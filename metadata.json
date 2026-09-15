@@ -1,0 +1,6 @@
+{
+  "name": "VARAVU&SELAVU",
+  "description": "Smart personal finance and shared expense manager for tracking varavu (income), selavu (expenses), budgeting, analytics, recurring bills, and bill splitting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
