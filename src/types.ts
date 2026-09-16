@@ -39,6 +39,17 @@ export interface Friend {
   avatarColor?: string;
 }
 
+export interface SplitGroup {
+  id: string;
+  name: string;
+  description?: string;
+  icon?: string; // e.g., ✈️, 🏠, 🍔, 🎉, 💼, 🚗
+  memberIds: string[]; // List of friend IDs plus 'YOU'
+  status: 'active' | 'closed';
+  createdAt: number;
+  closedAt?: number;
+}
+
 export interface SplitShare {
   personId: string; // 'YOU' or friend.id
   personName: string;
@@ -47,6 +58,7 @@ export interface SplitShare {
 
 export interface SplitExpense {
   id: string;
+  groupId?: string; // Optional group reference
   title: string;
   amount: number;
   date: string; // YYYY-MM-DD
@@ -75,4 +87,5 @@ export interface AppState {
   subscriptions: Subscription[];
   friends: Friend[];
   splitExpenses: SplitExpense[];
+  splitGroups: SplitGroup[];
 }

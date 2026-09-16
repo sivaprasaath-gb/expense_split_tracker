@@ -1,4 +1,4 @@
-import { AppState, Category, Transaction, Subscription, Friend, SplitExpense } from '../types';
+import { AppState, Category, Transaction, Subscription, Friend, SplitExpense, SplitGroup } from '../types';
 
 export const STORAGE_KEY = 'varavu_selavu_state_v1';
 
@@ -19,6 +19,7 @@ export const SEED_TRANSACTIONS: Transaction[] = [];
 export const SEED_SUBSCRIPTIONS: Subscription[] = [];
 export const SEED_FRIENDS: Friend[] = [];
 export const SEED_SPLIT_EXPENSES: SplitExpense[] = [];
+export const SEED_SPLIT_GROUPS: SplitGroup[] = [];
 
 // Optional sample templates if user explicitly requests demo data
 export const DEMO_SAMPLE_TRANSACTIONS: Transaction[] = [
@@ -83,6 +84,7 @@ export function getInitialState(): AppState {
     subscriptions: [],
     friends: [],
     splitExpenses: [],
+    splitGroups: [],
   };
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultState));
@@ -108,6 +110,7 @@ export function normalizeState(raw: Partial<AppState>): AppState {
     subscriptions: Array.isArray(raw.subscriptions) ? raw.subscriptions : [],
     friends: Array.isArray(raw.friends) ? raw.friends : [],
     splitExpenses: Array.isArray(raw.splitExpenses) ? raw.splitExpenses : [],
+    splitGroups: Array.isArray(raw.splitGroups) ? raw.splitGroups : [],
   };
 }
 

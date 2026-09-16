@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus } from 'lucide-react';
-import { AppState, Transaction, Subscription, Category, SplitExpense, PaymentMethod } from './types';
+import { AppState, Transaction, Subscription, Category, SplitExpense, PaymentMethod, SplitGroup } from './types';
 import { 
   getInitialState, 
   saveState, 
@@ -319,6 +319,74 @@ export default function App() {
     );
   };
 
+  // Handlers for Split Groups
+  const handleAddGroup = (groupData: Omit<SplitGroup, 'id' | 'createdAt'>) => {
+    const newGroup: SplitGroup = {
+      ...groupData,
+      id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      createdAt: Date.now(),
+    };
+    setState((prev) => ({
+      ...prev,
+      splitGroups: [...(prev.splitGroups || []), newGroup],
+    }));
+    addToast(`Group "${newGroup.name}" created!`, 'success');
+    return newGroup;
+  };
+
+  const handleUpdateGroup = (groupId: string, updates: Partial<SplitGroup>) => {
+    setState((prev) => ({
+      ...prev,
+      splitGroups: (prev.splitGroups || []).map((g) =>
+        g.id === groupId ? { ...g, ...updates } : g
+      ),
+    }));
+    addToast('Group updated successfully', 'success');
+  };
+
+  const handleToggleCloseGroup = (groupId: string) => {
+    setState((prev) => {
+      const group = (prev.splitGroups || []).find((g) => g.id === groupId);
+      if (!group) return prev;
+      const isClosing = group.status === 'active';
+      const updatedGroups = (prev.splitGroups || []).map((g) =>
+        g.id === groupId
+          ? {
+              ...g,
+              status: (isClosing ? 'closed' : 'active') as 'active' | 'closed',
+              closedAt: isClosing ? Date.now() : undefined,
+            }
+          : g
+      );
+      return {
+        ...prev,
+        splitGroups: updatedGroups,
+      };
+    });
+    addToast('Group status updated', 'info');
+  };
+
+  const handleDeleteGroup = (groupId: string) => {
+    const group = (state.splitGroups || []).find((g) => g.id === groupId);
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Split Group',
+      message: group
+        ? `Are you sure you want to delete "${group.name}"? All shared expenses logged under this group will also be permanently removed.`
+        : 'Are you sure you want to delete this group?',
+      confirmLabel: 'Delete Group',
+      isDestructive: true,
+      onConfirm: () => {
+        setState((prev) => ({
+          ...prev,
+          splitGroups: (prev.splitGroups || []).filter((g) => g.id !== groupId),
+          splitExpenses: prev.splitExpenses.filter((e) => e.groupId !== groupId),
+        }));
+        addToast('Group and its expenses deleted', 'info');
+      },
+    });
+  };
+
   // Settings Handlers
   const handleUpdateSettings = (updates: Partial<AppState>) => {
     setState((prev) => ({ ...prev, ...updates }));
@@ -380,6 +448,7 @@ export default function App() {
           subscriptions: [],
           friends: [],
           splitExpenses: [],
+          splitGroups: [],
         };
         setState(resetState);
         setSelectedMonth(getMonthKey(new Date()));
@@ -448,12 +517,17 @@ export default function App() {
           <SplitView
             friends={state.friends}
             splitExpenses={state.splitExpenses}
+            splitGroups={state.splitGroups || []}
             currency={state.currency}
             onAddFriend={handleAddFriend}
             onDeleteFriend={handleDeleteFriend}
             onAddSplitExpense={handleAddSplitExpense}
             onDeleteSplitExpense={handleDeleteSplitExpense}
             onSettleUp={handleSettleUp}
+            onAddGroup={handleAddGroup}
+            onUpdateGroup={handleUpdateGroup}
+            onToggleCloseGroup={handleToggleCloseGroup}
+            onDeleteGroup={handleDeleteGroup}
           />
         )}
 
