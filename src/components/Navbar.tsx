@@ -6,9 +6,13 @@ import {
   Moon, 
   Plus, 
   Calendar,
-  Wallet
+  Wallet,
+  LogIn,
+  LogOut,
+  UserCheck
 } from 'lucide-react';
 import { getMonthLabel, getAdjacentMonthKey, getMonthKey } from '../utils/storage';
+import { useAuth } from '../utils/AuthContext';
 
 interface NavbarProps {
   appName: string;
@@ -18,6 +22,7 @@ interface NavbarProps {
   theme: 'dark' | 'light';
   onThemeToggle: () => void;
   onOpenAddModal: () => void;
+  onOpenAuthModal: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -28,7 +33,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   theme,
   onThemeToggle,
   onOpenAddModal,
+  onOpenAuthModal,
 }) => {
+  const { user, logOut } = useAuth();
   const currentRealMonth = getMonthKey(new Date());
   const isCurrentMonth = selectedMonth === currentRealMonth;
 
@@ -118,8 +125,45 @@ export const Navbar: React.FC<NavbarProps> = ({
             {renderMonthNavigator(false)}
           </div>
 
-          {/* Actions (Theme + Add Transaction) */}
+          {/* Actions (User Auth + Theme + Add Transaction) */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* User Account / Login Button */}
+            {user ? (
+              <div className="flex items-center gap-1.5 bg-slate-800/60 light:bg-slate-100 border border-slate-700/60 light:border-slate-200 rounded-xl p-1 sm:px-2 sm:py-1">
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || 'User'}
+                    className="w-6 h-6 rounded-lg object-cover ring-1 ring-indigo-500"
+                  />
+                ) : (
+                  <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs font-bold uppercase">
+                    {(user.displayName || user.email || 'U')[0]}
+                  </div>
+                )}
+                <span className="hidden md:inline text-xs font-semibold text-slate-200 light:text-slate-800 max-w-[90px] truncate">
+                  {user.displayName || user.email?.split('@')[0]}
+                </span>
+                <button
+                  onClick={() => logOut()}
+                  className="p-1 text-slate-400 hover:text-rose-400 rounded-lg transition-colors ml-0.5"
+                  title="Sign Out"
+                  aria-label="Sign out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={onOpenAuthModal}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-xs sm:text-sm font-semibold transition-all active:scale-95"
+                title="Log In / Create Account"
+              >
+                <LogIn className="w-4 h-4" />
+                <span className="hidden sm:inline">Log In</span>
+              </button>
+            )}
+
             <button
               onClick={onThemeToggle}
               className="p-1.5 sm:p-2 rounded-xl border border-slate-700/60 light:border-slate-200 bg-slate-800/60 light:bg-slate-100 text-slate-300 light:text-slate-700 hover:text-white light:hover:text-black transition-colors"
@@ -131,7 +175,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               onClick={onOpenAddModal}
-              className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs sm:text-sm font-semibold shadow-md shadow-indigo-600/20 transition-all active:scale-95 shrink-0"
+              className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs sm:text-sm font-semibold shadow-md shadow-indigo-600/20 transition-all active:scale-95 shrink-0 cursor-pointer"
               aria-label="Add transaction"
             >
               <Plus className="w-4 h-4" />

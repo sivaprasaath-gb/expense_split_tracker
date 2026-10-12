@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Match user root doc
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidId(userId);
+      allow delete: if isOwner(userId);
+
+      // User Settings subcollection
+      match /settings/{settingId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User Transactions subcollection
+      match /transactions/{transactionId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User Categories subcollection
+      match /categories/{categoryId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User Subscriptions subcollection
+      match /subscriptions/{subscriptionId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User Friends subcollection
+      match /friends/{friendId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User Split Groups subcollection
+      match /splitGroups/{groupId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User Split Expenses subcollection
+      match /splitExpenses/{expenseId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+  }
+}

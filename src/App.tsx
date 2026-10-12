@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Plus } from 'lucide-react';
-import { AppState, Transaction, Subscription, Category, SplitExpense, PaymentMethod, SplitGroup } from './types';
+import { AppState, Transaction, Subscription, Category, SplitExpense, PaymentMethod, SplitGroup, Friend } from './types';
 import { 
   getInitialState, 
   saveState, 
@@ -13,6 +13,25 @@ import {
   SEED_SPLIT_EXPENSES 
 } from './utils/storage';
 import { calculateBalances } from './utils/splitEngine';
+import { useAuth } from './utils/AuthContext';
+import { 
+  subscribeToUserData, 
+  syncUserProfile, 
+  saveUserSettingsToFirestore,
+  saveTransactionToFirestore,
+  deleteTransactionFromFirestore,
+  saveSubscriptionToFirestore,
+  deleteSubscriptionFromFirestore,
+  saveFriendToFirestore,
+  deleteFriendFromFirestore,
+  saveSplitGroupToFirestore,
+  deleteSplitGroupFromFirestore,
+  saveSplitExpenseToFirestore,
+  deleteSplitExpenseFromFirestore,
+  saveCategoryToFirestore,
+  deleteCategoryFromFirestore,
+  migrateLocalStateToFirestore
+} from './utils/firestoreSync';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { DashboardView } from './components/DashboardView';
@@ -25,14 +44,18 @@ import { TransactionModal } from './components/TransactionModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { SplashScreen } from './components/SplashScreen';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { AuthModal } from './components/AuthModal';
 
 export default function App() {
+  const { user, loading: authLoading } = useAuth();
   const [showSplash, setShowSplash] = useState(true);
   const [state, setState] = useState<AppState>(() => getInitialState());
   const [selectedMonth, setSelectedMonth] = useState<string>(() => getMonthKey(new Date()));
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const hasMigratedRef = useRef<string | null>(null);
 
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -52,10 +75,63 @@ export default function App() {
     document.title = `${state.appName} - Smart Expense & Split Tracker`;
   }, [state.theme, state.appName]);
 
-  // Save state on change
+  // Save state to local cache as reliable offline fallback
   useEffect(() => {
     saveState(state);
   }, [state]);
+
+  // Synchronize with Firebase Firestore whenever user is logged in
+  useEffect(() => {
+    if (!user) {
+      hasMigratedRef.current = null;
+      return;
+    }
+
+    // Sync profile
+    syncUserProfile(user.uid, user.email || '', user.displayName || undefined, user.photoURL || undefined);
+
+    // Initial check: if local storage has existing transactions/groups and this is a first sign-in, offer background migration
+    if (hasMigratedRef.current !== user.uid) {
+      hasMigratedRef.current = user.uid;
+      const currentLocal = getInitialState();
+      if (currentLocal.transactions.length > 0 || currentLocal.friends.length > 0 || currentLocal.splitGroups.length > 0) {
+        migrateLocalStateToFirestore(user.uid, currentLocal);
+      }
+    }
+
+    // Subscribe to realtime updates from Firestore
+    const unsubscribe = subscribeToUserData(user.uid, {
+      onSettings: (settings) => {
+        setState((prev) => ({
+          ...prev,
+          appName: settings.appName || prev.appName,
+          currency: settings.currency || prev.currency,
+          budgetLimit: typeof settings.budgetLimit === 'number' ? settings.budgetLimit : prev.budgetLimit,
+          theme: settings.theme || prev.theme,
+        }));
+      },
+      onTransactions: (transactions) => {
+        setState((prev) => ({ ...prev, transactions }));
+      },
+      onCategories: (categories) => {
+        setState((prev) => ({ ...prev, categories }));
+      },
+      onSubscriptions: (subscriptions) => {
+        setState((prev) => ({ ...prev, subscriptions }));
+      },
+      onFriends: (friends) => {
+        setState((prev) => ({ ...prev, friends }));
+      },
+      onSplitGroups: (splitGroups) => {
+        setState((prev) => ({ ...prev, splitGroups }));
+      },
+      onSplitExpenses: (splitExpenses) => {
+        setState((prev) => ({ ...prev, splitExpenses }));
+      },
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   // Scroll to top when switching views/tabs
   useEffect(() => {
@@ -102,14 +178,21 @@ export default function App() {
     existingId?: string
   ) => {
     if (existingId) {
+      const existing = state.transactions.find((t) => t.id === existingId);
+      const updatedTx: Transaction = {
+        ...txData,
+        id: existingId,
+        createdAt: existing?.createdAt || Date.now(),
+      };
       setState((prev) => ({
         ...prev,
         transactions: prev.transactions.map((t) =>
-          t.id === existingId
-            ? { ...t, ...txData }
-            : t
+          t.id === existingId ? updatedTx : t
         ),
       }));
+      if (user) {
+        saveTransactionToFirestore(user.uid, updatedTx);
+      }
       addToast('Transaction updated', 'success');
     } else {
       const newTx: Transaction = {
@@ -121,6 +204,9 @@ export default function App() {
         ...prev,
         transactions: [newTx, ...prev.transactions],
       }));
+      if (user) {
+        saveTransactionToFirestore(user.uid, newTx);
+      }
       // If transaction date is in another month, optionally update selectedMonth
       const txMonth = newTx.date.slice(0, 7);
       if (txMonth !== selectedMonth) {
@@ -143,6 +229,9 @@ export default function App() {
           ...prev,
           transactions: prev.transactions.filter((t) => t.id !== id),
         }));
+        if (user) {
+          deleteTransactionFromFirestore(user.uid, id);
+        }
         addToast('Transaction deleted', 'info');
       },
     });
@@ -158,16 +247,26 @@ export default function App() {
       ...prev,
       subscriptions: [...prev.subscriptions, newSub],
     }));
+    if (user) {
+      saveSubscriptionToFirestore(user.uid, newSub);
+    }
     addToast(`Subscription "${newSub.name}" added`, 'success');
   };
 
   const handleUpdateSubscription = (id: string, updates: Partial<Subscription>) => {
-    setState((prev) => ({
-      ...prev,
-      subscriptions: prev.subscriptions.map((s) =>
-        s.id === id ? { ...s, ...updates } : s
-      ),
-    }));
+    const existing = state.subscriptions.find((s) => s.id === id);
+    if (existing) {
+      const updatedSub: Subscription = { ...existing, ...updates };
+      setState((prev) => ({
+        ...prev,
+        subscriptions: prev.subscriptions.map((s) =>
+          s.id === id ? updatedSub : s
+        ),
+      }));
+      if (user) {
+        saveSubscriptionToFirestore(user.uid, updatedSub);
+      }
+    }
     addToast('Subscription updated', 'success');
   };
 
@@ -184,6 +283,9 @@ export default function App() {
           ...prev,
           subscriptions: prev.subscriptions.filter((s) => s.id !== id),
         }));
+        if (user) {
+          deleteSubscriptionFromFirestore(user.uid, id);
+        }
         addToast('Subscription removed', 'info');
       },
     });
@@ -209,6 +311,9 @@ export default function App() {
       ...prev,
       transactions: [newTx, ...prev.transactions],
     }));
+    if (user) {
+      saveTransactionToFirestore(user.uid, newTx);
+    }
     addToast(`Logged "${sub.name}" into ${selectedMonth}`, 'success');
   };
 
@@ -217,7 +322,7 @@ export default function App() {
     const colors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#14b8a6'];
     const avatarColor = colors[state.friends.length % colors.length];
 
-    const newFriend = {
+    const newFriend: Friend = {
       id: `friend-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name,
       note,
@@ -228,6 +333,9 @@ export default function App() {
       ...prev,
       friends: [...prev.friends, newFriend],
     }));
+    if (user) {
+      saveFriendToFirestore(user.uid, newFriend);
+    }
     addToast(`Friend ${name} added`, 'success');
   };
 
@@ -244,6 +352,9 @@ export default function App() {
           ...prev,
           friends: prev.friends.filter((f) => f.id !== friendId),
         }));
+        if (user) {
+          deleteFriendFromFirestore(user.uid, friendId);
+        }
         addToast(`Friend removed`, 'info');
       },
     });
@@ -258,6 +369,9 @@ export default function App() {
       ...prev,
       splitExpenses: [...prev.splitExpenses, newExpense],
     }));
+    if (user) {
+      saveSplitExpenseToFirestore(user.uid, newExpense);
+    }
     addToast(`Split expense "${newExpense.title}" recorded`, 'success');
   };
 
@@ -276,6 +390,9 @@ export default function App() {
           ...prev,
           splitExpenses: prev.splitExpenses.filter((e) => e.id !== expenseId),
         }));
+        if (user) {
+          deleteSplitExpenseFromFirestore(user.uid, expenseId);
+        }
         addToast('Shared expense deleted', 'info');
       },
     });
@@ -286,6 +403,7 @@ export default function App() {
     logToTransactions: boolean = true,
     paymentMethod: PaymentMethod = 'UPI'
   ) => {
+    let createdTx: Transaction | null = null;
     setState((prev) => {
       let updatedTransactions = prev.transactions;
       if (logToTransactions) {
@@ -301,6 +419,7 @@ export default function App() {
           note: settlementExpense.note || 'Debt Settlement',
           createdAt: Date.now(),
         };
+        createdTx = newTx;
         updatedTransactions = [newTx, ...prev.transactions];
       }
 
@@ -310,6 +429,13 @@ export default function App() {
         splitExpenses: [...prev.splitExpenses, settlementExpense],
       };
     });
+
+    if (user) {
+      saveSplitExpenseToFirestore(user.uid, settlementExpense);
+      if (createdTx) {
+        saveTransactionToFirestore(user.uid, createdTx);
+      }
+    }
 
     addToast(
       logToTransactions
@@ -330,39 +456,53 @@ export default function App() {
       ...prev,
       splitGroups: [...(prev.splitGroups || []), newGroup],
     }));
+    if (user) {
+      saveSplitGroupToFirestore(user.uid, newGroup);
+    }
     addToast(`Group "${newGroup.name}" created!`, 'success');
     return newGroup;
   };
 
   const handleUpdateGroup = (groupId: string, updates: Partial<SplitGroup>) => {
-    setState((prev) => ({
-      ...prev,
-      splitGroups: (prev.splitGroups || []).map((g) =>
-        g.id === groupId ? { ...g, ...updates } : g
-      ),
-    }));
+    const existing = (state.splitGroups || []).find((g) => g.id === groupId);
+    if (existing) {
+      const updatedGroup: SplitGroup = { ...existing, ...updates };
+      setState((prev) => ({
+        ...prev,
+        splitGroups: (prev.splitGroups || []).map((g) =>
+          g.id === groupId ? updatedGroup : g
+        ),
+      }));
+      if (user) {
+        saveSplitGroupToFirestore(user.uid, updatedGroup);
+      }
+    }
     addToast('Group updated successfully', 'success');
   };
 
   const handleToggleCloseGroup = (groupId: string) => {
+    let updatedGroup: SplitGroup | null = null;
     setState((prev) => {
       const group = (prev.splitGroups || []).find((g) => g.id === groupId);
       if (!group) return prev;
       const isClosing = group.status === 'active';
+      const updated = {
+        ...group,
+        status: (isClosing ? 'closed' : 'active') as 'active' | 'closed',
+        closedAt: isClosing ? Date.now() : undefined,
+      };
+      updatedGroup = updated;
       const updatedGroups = (prev.splitGroups || []).map((g) =>
-        g.id === groupId
-          ? {
-              ...g,
-              status: (isClosing ? 'closed' : 'active') as 'active' | 'closed',
-              closedAt: isClosing ? Date.now() : undefined,
-            }
-          : g
+        g.id === groupId ? updated : g
       );
       return {
         ...prev,
         splitGroups: updatedGroups,
       };
     });
+    if (user && updatedGroup) {
+      saveSplitGroupToFirestore(user.uid, updatedGroup);
+    }
     addToast('Group status updated', 'info');
   };
 
@@ -377,11 +517,16 @@ export default function App() {
       confirmLabel: 'Delete Group',
       isDestructive: true,
       onConfirm: () => {
+        const groupExpenses = state.splitExpenses.filter((e) => e.groupId === groupId);
         setState((prev) => ({
           ...prev,
           splitGroups: (prev.splitGroups || []).filter((g) => g.id !== groupId),
           splitExpenses: prev.splitExpenses.filter((e) => e.groupId !== groupId),
         }));
+        if (user) {
+          deleteSplitGroupFromFirestore(user.uid, groupId);
+          groupExpenses.forEach((exp) => deleteSplitExpenseFromFirestore(user.uid, exp.id));
+        }
         addToast('Group and its expenses deleted', 'info');
       },
     });
@@ -389,7 +534,13 @@ export default function App() {
 
   // Settings Handlers
   const handleUpdateSettings = (updates: Partial<AppState>) => {
-    setState((prev) => ({ ...prev, ...updates }));
+    setState((prev) => {
+      const next = { ...prev, ...updates };
+      if (user) {
+        saveUserSettingsToFirestore(user.uid, next);
+      }
+      return next;
+    });
   };
 
   const handleAddCategory = (cat: Category) => {
@@ -397,6 +548,9 @@ export default function App() {
       ...prev,
       categories: [...prev.categories, cat],
     }));
+    if (user) {
+      saveCategoryToFirestore(user.uid, cat);
+    }
   };
 
   const handleUpdateCategory = (cat: Category) => {
@@ -404,6 +558,9 @@ export default function App() {
       ...prev,
       categories: prev.categories.map((c) => (c.id === cat.id ? cat : c)),
     }));
+    if (user) {
+      saveCategoryToFirestore(user.uid, cat);
+    }
   };
 
   const handleDeleteCategory = (catId: string) => {
@@ -419,6 +576,9 @@ export default function App() {
           ...prev,
           categories: prev.categories.filter((c) => c.id !== catId),
         }));
+        if (user) {
+          deleteCategoryFromFirestore(user.uid, catId);
+        }
         addToast(cat ? `Category "${cat.name}" deleted` : 'Category deleted', 'info');
       },
     });
@@ -470,6 +630,7 @@ export default function App() {
           handleUpdateSettings({ theme: state.theme === 'dark' ? 'light' : 'dark' })
         }
         onOpenAddModal={handleOpenAddTx}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
       />
 
       {/* Main Container */}
@@ -604,6 +765,13 @@ export default function App() {
           onCancel={() => setConfirmModal(null)}
         />
       )}
+
+      {/* Authentication Modal (Login / Create Account) */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        appName={state.appName}
+      />
 
       {/* Splash Screen on Launch */}
       {showSplash && (

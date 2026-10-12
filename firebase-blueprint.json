@@ -1,0 +1,162 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with personal display preferences and account metadata",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User specific app configuration such as appName, currency, budgetLimit, theme, categories",
+      "type": "object",
+      "properties": {
+        "appName": { "type": "string", "maxLength": 50 },
+        "currency": { "type": "string", "maxLength": 10 },
+        "budgetLimit": { "type": "number" },
+        "theme": { "type": "string", "enum": ["dark", "light"] },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["appName", "currency", "budgetLimit", "theme"]
+    },
+    "CategoryItem": {
+      "title": "CategoryItem",
+      "description": "Budget category definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 64 },
+        "icon": { "type": "string", "maxLength": 16 },
+        "color": { "type": "string", "maxLength": 32 },
+        "budget": { "type": "number" },
+        "userId": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "icon", "userId"]
+    },
+    "TransactionItem": {
+      "title": "TransactionItem",
+      "description": "Income or expense record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 120 },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["expense", "income"] },
+        "category": { "type": "string", "maxLength": 64 },
+        "date": { "type": "string", "maxLength": 20 },
+        "note": { "type": "string", "maxLength": 500 },
+        "paymentMethod": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "title", "amount", "type", "category", "date"]
+    },
+    "SubscriptionItem": {
+      "title": "SubscriptionItem",
+      "description": "Recurring monthly subscription",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "amount": { "type": "number" },
+        "day": { "type": "number" },
+        "category": { "type": "string", "maxLength": 64 },
+        "active": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "name", "amount", "day", "category", "active"]
+    },
+    "FriendItem": {
+      "title": "FriendItem",
+      "description": "Friend contact for shared splitting",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "note": { "type": "string", "maxLength": 300 },
+        "avatarColor": { "type": "string", "maxLength": 32 }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "SplitGroupItem": {
+      "title": "SplitGroupItem",
+      "description": "Split group for organizing shared trip or event expenses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 300 },
+        "icon": { "type": "string", "maxLength": 16 },
+        "status": { "type": "string", "enum": ["active", "closed"] },
+        "createdAt": { "type": "number" },
+        "closedAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "name", "status"]
+    },
+    "SplitExpenseItem": {
+      "title": "SplitExpenseItem",
+      "description": "Shared expense or settlement record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "groupId": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 120 },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "maxLength": 20 },
+        "paidBy": { "type": "string", "maxLength": 64 },
+        "paidByName": { "type": "string", "maxLength": 100 },
+        "note": { "type": "string", "maxLength": 500 },
+        "isSettlement": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "title", "amount", "date", "paidBy", "paidByName"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile with display info"
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": "UserSettings",
+      "description": "User specific app configuration"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": "TransactionItem",
+      "description": "User personal income and expense transactions"
+    },
+    "/users/{userId}/categories/{categoryId}": {
+      "schema": "CategoryItem",
+      "description": "User custom budget categories"
+    },
+    "/users/{userId}/subscriptions/{subscriptionId}": {
+      "schema": "SubscriptionItem",
+      "description": "User recurring subscriptions"
+    },
+    "/users/{userId}/friends/{friendId}": {
+      "schema": "FriendItem",
+      "description": "User split friends list"
+    },
+    "/users/{userId}/splitGroups/{groupId}": {
+      "schema": "SplitGroupItem",
+      "description": "User split groups"
+    },
+    "/users/{userId}/splitExpenses/{expenseId}": {
+      "schema": "SplitExpenseItem",
+      "description": "User split expenses and settlements"
+    }
+  }
+}

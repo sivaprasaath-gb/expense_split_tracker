@@ -244,13 +244,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex items-center gap-2 border-b border-slate-800/80 light:border-slate-200 pb-3">
             <Database className="w-4 h-4 text-indigo-400" />
             <h3 className="text-sm font-bold text-slate-100 light:text-slate-900">
-              Data & Backups
+              Cloud Storage & Backups
             </h3>
           </div>
 
           <div className="space-y-3">
+            {/* Cloud Status Banner */}
+            <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-indigo-300 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  Firebase Cloud Storage
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold">
+                  Active
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-indigo-500/15">
+                <span className="text-[11px] text-slate-400">Firebase Project:</span>
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 light:bg-slate-200 text-indigo-300 light:text-indigo-700 font-bold">
+                  varaavuselaavu
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 light:text-slate-600">
+                Data is saved in realtime to Google Firebase Firestore under project <strong className="text-indigo-300 font-mono">varaavuselaavu</strong> when logged in, with seamless offline local caching.
+              </p>
+            </div>
+
             <p className="text-xs text-slate-400 leading-relaxed">
-              {state.appName || 'VARAVU&SELAVU'} stores your financial data securely in your browser&apos;s local storage. You can create JSON backups or restore previous data anytime.
+              You can also export instant offline JSON backups or restore existing backups across machines at any time.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-2">
