@@ -53,11 +53,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cred = await createUserWithEmailAndPassword(auth, email, pass);
     if (name && cred.user) {
       await updateProfile(cred.user, { displayName: name });
+      // Update local state snapshot immediately so components display the updated name
+      setUser({ ...cred.user, displayName: name });
+    } else {
+      setUser(cred.user);
     }
   };
 
   const logOut = async () => {
     await signOut(auth);
+    setUser(null);
   };
 
   return (

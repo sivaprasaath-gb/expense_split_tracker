@@ -1,0 +1,6 @@
+{
+  "summary": "Implementation plan for Direct iPhone SMS Webhook Integration. Captures debit bank SMS in real-time via iOS Shortcuts Automation, sends directly to an app webhook endpoint, parses transactions automatically (amount, merchant, payment mode, date), and queues them in the Pending Review Inbox for 1-tap approval or split—completely eliminating spreadsheets.",
+  "updatedAt": "2026-10-14T17:55:07.883389889Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

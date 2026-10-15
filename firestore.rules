@@ -59,6 +59,11 @@ service cloud.firestore {
       match /splitExpenses/{expenseId} {
         allow read, write: if isOwner(userId);
       }
+
+      // User Pending Transactions subcollection (iPhone sync inbox)
+      match /pendingTransactions/{pendingId} {
+        allow read, write: if isOwner(userId);
+      }
     }
   }
 }

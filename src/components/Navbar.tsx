@@ -9,7 +9,9 @@ import {
   Wallet,
   LogIn,
   LogOut,
-  UserCheck
+  UserCheck,
+  Inbox,
+  Smartphone
 } from 'lucide-react';
 import { getMonthLabel, getAdjacentMonthKey, getMonthKey } from '../utils/storage';
 import { useAuth } from '../utils/AuthContext';
@@ -23,6 +25,10 @@ interface NavbarProps {
   onThemeToggle: () => void;
   onOpenAddModal: () => void;
   onOpenAuthModal: () => void;
+  onOpenLogin?: () => void;
+  onOpenSignUp?: () => void;
+  onOpenPendingInbox?: () => void;
+  pendingCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -34,6 +40,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   onThemeToggle,
   onOpenAddModal,
   onOpenAuthModal,
+  onOpenLogin,
+  onOpenSignUp,
+  onOpenPendingInbox,
+  pendingCount = 0,
 }) => {
   const { user, logOut } = useAuth();
   const currentRealMonth = getMonthKey(new Date());
@@ -154,13 +164,45 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               </div>
             ) : (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={onOpenLogin || onOpenAuthModal}
+                  className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl bg-slate-800/80 light:bg-slate-100 hover:bg-slate-700 light:hover:bg-slate-200 text-slate-300 light:text-slate-700 border border-slate-700/60 light:border-slate-300 text-xs font-semibold transition-all active:scale-95 cursor-pointer"
+                  title="Log In to Existing Account"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Log In</span>
+                </button>
+                <button
+                  onClick={onOpenSignUp || onOpenAuthModal}
+                  className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm shadow-indigo-600/30 text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                  title="Create New Free Account"
+                >
+                  <span className="hidden xs:inline">Create Account</span>
+                  <span className="xs:hidden">Sign Up</span>
+                </button>
+              </div>
+            )}
+
+            {/* iPhone Automation Sync / Inbox Button */}
+            {pendingCount > 0 ? (
               <button
-                onClick={onOpenAuthModal}
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-xs sm:text-sm font-semibold transition-all active:scale-95"
-                title="Log In / Create Account"
+                onClick={onOpenPendingInbox}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/40 text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm animate-pulse"
+                title={`${pendingCount} automated debits awaiting your review`}
               >
-                <LogIn className="w-4 h-4" />
-                <span className="hidden sm:inline">Log In</span>
+                <Inbox className="w-3.5 h-3.5" />
+                <span>Inbox ({pendingCount})</span>
+              </button>
+            ) : (
+              <button
+                onClick={onOpenPendingInbox}
+                className="hidden xs:flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl bg-slate-800/80 light:bg-slate-100 hover:bg-slate-700 light:hover:bg-slate-200 text-slate-300 light:text-slate-700 border border-slate-700/60 light:border-slate-300 text-xs font-semibold transition-all active:scale-95 cursor-pointer"
+                title="Sync iPhone Transactions from Numbers or CSV"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="hidden md:inline">Sync iPhone</span>
+                <span className="md:hidden">Sync</span>
               </button>
             )}
 

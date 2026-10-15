@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Plus } from 'lucide-react';
-import { AppState, Transaction, Subscription, Category, SplitExpense, PaymentMethod, SplitGroup, Friend } from './types';
+import { AppState, Transaction, Subscription, Category, SplitExpense, PaymentMethod, SplitGroup, Friend, PendingTransaction } from './types';
 import { 
   getInitialState, 
   saveState, 
@@ -10,7 +10,8 @@ import {
   DEFAULT_CATEGORIES, 
   SEED_SUBSCRIPTIONS, 
   SEED_FRIENDS, 
-  SEED_SPLIT_EXPENSES 
+  SEED_SPLIT_EXPENSES,
+  generateWebhookKey
 } from './utils/storage';
 import { calculateBalances } from './utils/splitEngine';
 import { useAuth } from './utils/AuthContext';
@@ -30,8 +31,13 @@ import {
   deleteSplitExpenseFromFirestore,
   saveCategoryToFirestore,
   deleteCategoryFromFirestore,
-  migrateLocalStateToFirestore
+  migrateLocalStateToFirestore,
+  savePendingTransactionToFirestore,
+  batchSavePendingTransactionsToFirestore,
+  deletePendingTransactionFromFirestore,
+  clearAllPendingTransactionsFromFirestore
 } from './utils/firestoreSync';
+import { parseSpreadsheetTransactions } from './utils/csvSyncEngine';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { DashboardView } from './components/DashboardView';
@@ -45,6 +51,8 @@ import { ToastContainer, ToastMessage } from './components/Toast';
 import { SplashScreen } from './components/SplashScreen';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { AuthModal } from './components/AuthModal';
+import { PendingInboxModal } from './components/PendingInboxModal';
+import { IPhoneShortcutGuideModal } from './components/IPhoneShortcutGuideModal';
 
 export default function App() {
   const { user, loading: authLoading } = useAuth();
@@ -53,9 +61,24 @@ export default function App() {
   const [selectedMonth, setSelectedMonth] = useState<string>(() => getMonthKey(new Date()));
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'signup'>('login');
+  const [isPendingInboxOpen, setIsPendingInboxOpen] = useState(false);
+  const [isShortcutGuideOpen, setIsShortcutGuideOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const hasMigratedRef = useRef<string | null>(null);
+  const prevUserRef = useRef<string | null>(null);
+
+  // Auth modal openers
+  const handleOpenLogin = useCallback(() => {
+    setAuthModalMode('login');
+    setIsAuthModalOpen(true);
+  }, []);
+
+  const handleOpenSignUp = useCallback(() => {
+    setAuthModalMode('signup');
+    setIsAuthModalOpen(true);
+  }, []);
 
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -80,6 +103,31 @@ export default function App() {
     saveState(state);
   }, [state]);
 
+  // Clean data isolation on user sign out
+  useEffect(() => {
+    if (prevUserRef.current && !user) {
+      // User signed out: reset local state so user data is cleanly isolated
+      const cleanResetState: AppState = {
+        appName: 'VARAVU&SELAVU',
+        currency: 'INR',
+        budgetLimit: 0,
+        theme: state.theme,
+        activeTab: 'dashboard',
+        transactions: [],
+        categories: DEFAULT_CATEGORIES,
+        subscriptions: [],
+        friends: [],
+        splitExpenses: [],
+        splitGroups: [],
+        pendingTransactions: [],
+      };
+      setState(cleanResetState);
+      saveState(cleanResetState);
+      hasMigratedRef.current = null;
+    }
+    prevUserRef.current = user?.uid || null;
+  }, [user, state.theme]);
+
   // Synchronize with Firebase Firestore whenever user is logged in
   useEffect(() => {
     if (!user) {
@@ -94,6 +142,7 @@ export default function App() {
     if (hasMigratedRef.current !== user.uid) {
       hasMigratedRef.current = user.uid;
       const currentLocal = getInitialState();
+      // Only migrate if there are local guest transactions
       if (currentLocal.transactions.length > 0 || currentLocal.friends.length > 0 || currentLocal.splitGroups.length > 0) {
         migrateLocalStateToFirestore(user.uid, currentLocal);
       }
@@ -108,6 +157,7 @@ export default function App() {
           currency: settings.currency || prev.currency,
           budgetLimit: typeof settings.budgetLimit === 'number' ? settings.budgetLimit : prev.budgetLimit,
           theme: settings.theme || prev.theme,
+          smsWebhookKey: settings.smsWebhookKey || prev.smsWebhookKey,
         }));
       },
       onTransactions: (transactions) => {
@@ -127,6 +177,9 @@ export default function App() {
       },
       onSplitExpenses: (splitExpenses) => {
         setState((prev) => ({ ...prev, splitExpenses }));
+      },
+      onPendingTransactions: (pendingTransactions) => {
+        setState((prev) => ({ ...prev, pendingTransactions }));
       },
     });
 
@@ -609,12 +662,335 @@ export default function App() {
           friends: [],
           splitExpenses: [],
           splitGroups: [],
+          pendingTransactions: [],
         };
         setState(resetState);
         setSelectedMonth(getMonthKey(new Date()));
         addToast('All data cleared successfully. Fresh start ready!', 'info');
       },
     });
+  };
+
+  // Pending Transactions Handlers (iPhone & CSV Automation Sync)
+  const handleApprovePendingSingle = (pending: PendingTransaction) => {
+    const txId = pending.id.startsWith('sync_')
+      ? pending.id.replace('sync_', 'tx_')
+      : `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    const newTx: Transaction = {
+      id: txId,
+      title: pending.title,
+      amount: pending.amount,
+      type: 'expense',
+      category: pending.category,
+      date: pending.date,
+      note: pending.note,
+      paymentMethod: pending.paymentMethod || 'UPI',
+      createdAt: Date.now(),
+    };
+
+    let createdSplitExp: SplitExpense | null = null;
+    if (pending.isSplit && pending.splitWithMemberIds && pending.splitWithMemberIds.length > 1) {
+      const count = pending.splitWithMemberIds.length;
+      const splitAmount = Math.round((pending.amount / count) * 100) / 100;
+      const shares = pending.splitWithMemberIds.map((memId) => {
+        const friend = state.friends.find((f) => f.id === memId);
+        return {
+          personId: memId,
+          personName: memId === 'YOU' ? 'You' : (friend?.name || 'Friend'),
+          amount: splitAmount,
+        };
+      });
+
+      createdSplitExp = {
+        id: `split-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        groupId: pending.splitGroupId,
+        title: pending.title,
+        amount: pending.amount,
+        date: pending.date,
+        paidBy: 'YOU',
+        paidByName: 'You',
+        shares,
+        note: `Auto-split from ${pending.title} (iPhone debit)`,
+      };
+    }
+
+    setState((prev) => ({
+      ...prev,
+      transactions: [newTx, ...prev.transactions],
+      splitExpenses: createdSplitExp ? [...prev.splitExpenses, createdSplitExp] : prev.splitExpenses,
+      pendingTransactions: (prev.pendingTransactions || []).filter((p) => p.id !== pending.id),
+    }));
+
+    if (user) {
+      saveTransactionToFirestore(user.uid, newTx);
+      deletePendingTransactionFromFirestore(user.uid, pending.id);
+      if (createdSplitExp) {
+        saveSplitExpenseToFirestore(user.uid, createdSplitExp);
+      }
+    }
+
+    addToast(`Approved expense "${newTx.title}" (-₹${newTx.amount})`, 'success');
+  };
+
+  const handleApprovePendingAll = (items: PendingTransaction[]) => {
+    if (!items.length) return;
+
+    const newTxs: Transaction[] = [];
+    const newSplits: SplitExpense[] = [];
+    const itemIds = new Set(items.map((i) => i.id));
+
+    items.forEach((pending) => {
+      const txId = pending.id.startsWith('sync_')
+        ? pending.id.replace('sync_', 'tx_')
+        : `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+      const newTx: Transaction = {
+        id: txId,
+        title: pending.title,
+        amount: pending.amount,
+        type: 'expense',
+        category: pending.category,
+        date: pending.date,
+        note: pending.note,
+        paymentMethod: pending.paymentMethod || 'UPI',
+        createdAt: Date.now(),
+      };
+      newTxs.push(newTx);
+
+      if (pending.isSplit && pending.splitWithMemberIds && pending.splitWithMemberIds.length > 1) {
+        const count = pending.splitWithMemberIds.length;
+        const splitAmount = Math.round((pending.amount / count) * 100) / 100;
+        const shares = pending.splitWithMemberIds.map((memId) => {
+          const friend = state.friends.find((f) => f.id === memId);
+          return {
+            personId: memId,
+            personName: memId === 'YOU' ? 'You' : (friend?.name || 'Friend'),
+            amount: splitAmount,
+          };
+        });
+
+        newSplits.push({
+          id: `split-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          groupId: pending.splitGroupId,
+          title: pending.title,
+          amount: pending.amount,
+          date: pending.date,
+          paidBy: 'YOU',
+          paidByName: 'You',
+          shares,
+          note: `Auto-split from ${pending.title}`,
+        });
+      }
+    });
+
+    setState((prev) => ({
+      ...prev,
+      transactions: [...newTxs, ...prev.transactions],
+      splitExpenses: [...newSplits, ...prev.splitExpenses],
+      pendingTransactions: (prev.pendingTransactions || []).filter((p) => !itemIds.has(p.id)),
+    }));
+
+    if (user) {
+      newTxs.forEach((tx) => saveTransactionToFirestore(user.uid, tx));
+      newSplits.forEach((sp) => saveSplitExpenseToFirestore(user.uid, sp));
+      items.forEach((p) => deletePendingTransactionFromFirestore(user.uid, p.id));
+    }
+
+    addToast(`Approved all ${items.length} automated debit expenses!`, 'success');
+  };
+
+  const handleDismissPendingSingle = (id: string) => {
+    setState((prev) => ({
+      ...prev,
+      pendingTransactions: (prev.pendingTransactions || []).filter((p) => p.id !== id),
+    }));
+    if (user) {
+      deletePendingTransactionFromFirestore(user.uid, id);
+    }
+    addToast('Pending transaction dismissed', 'info');
+  };
+
+  const handleDismissAllPending = () => {
+    const count = state.pendingTransactions?.length || 0;
+    if (count === 0) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Clear All Pending Items',
+      message: `Dismiss all ${count} unreviewed pending transactions? They will not be recorded in your expenses.`,
+      confirmLabel: 'Clear Pending',
+      isDestructive: true,
+      onConfirm: () => {
+        const toDelete = state.pendingTransactions || [];
+        setState((prev) => ({
+          ...prev,
+          pendingTransactions: [],
+        }));
+        if (user) {
+          clearAllPendingTransactionsFromFirestore(user.uid, toDelete);
+        }
+        addToast(`Cleared ${count} pending debits`, 'info');
+      },
+    });
+  };
+
+  const handleUpdatePendingItem = (id: string, updates: Partial<PendingTransaction>) => {
+    setState((prev) => {
+      const list = prev.pendingTransactions || [];
+      const updated = list.map((item) => (item.id === id ? { ...item, ...updates } : item));
+      const targetItem = updated.find((i) => i.id === id);
+      if (user && targetItem) {
+        savePendingTransactionToFirestore(user.uid, targetItem);
+      }
+      return {
+        ...prev,
+        pendingTransactions: updated,
+      };
+    });
+  };
+
+  const handleImportCsv = (csvContent: string) => {
+    const result = parseSpreadsheetTransactions(
+      csvContent,
+      state.categories,
+      state.transactions,
+      state.pendingTransactions || []
+    );
+
+    if (result.newTransactions.length > 0) {
+      setState((prev) => ({
+        ...prev,
+        pendingTransactions: [...(prev.pendingTransactions || []), ...result.newTransactions],
+      }));
+      if (user) {
+        batchSavePendingTransactionsToFirestore(user.uid, result.newTransactions);
+      }
+      setIsPendingInboxOpen(true);
+      addToast(
+        `Added ${result.newTransactions.length} automated debit(s) to inbox!${
+          result.duplicateCount > 0 ? ` (${result.duplicateCount} duplicates skipped)` : ''
+        }`,
+        'success'
+      );
+    } else if (result.duplicateCount > 0) {
+      addToast(`All ${result.duplicateCount} transactions were already recorded!`, 'info');
+    } else {
+      addToast('No new transactions found in sheet.', 'error');
+    }
+  };
+
+  const [isRefreshingWebhook, setIsRefreshingWebhook] = useState(false);
+
+  const fetchSmsFromWebhookQueue = useCallback(async (isManual: boolean = false) => {
+    const key = state.smsWebhookKey;
+    if (!key) return;
+
+    if (isManual) {
+      setIsRefreshingWebhook(true);
+    }
+
+    try {
+      const res = await fetch(`/api/sms-inbox?key=${encodeURIComponent(key)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const incoming: PendingTransaction[] = data.transactions || [];
+
+      if (incoming.length > 0) {
+        const existingPendingIds = new Set((state.pendingTransactions || []).map((p) => p.id));
+        const existingTxIds = new Set(state.transactions.map((t) => t.id));
+
+        const brandNew = incoming.filter((item) => !existingPendingIds.has(item.id) && !existingTxIds.has(item.id));
+
+        if (brandNew.length > 0) {
+          setState((prev) => ({
+            ...prev,
+            pendingTransactions: [...brandNew, ...(prev.pendingTransactions || [])],
+          }));
+
+          if (user) {
+            batchSavePendingTransactionsToFirestore(user.uid, brandNew);
+          }
+
+          // Acknowledge these items so server queue clears them
+          await fetch('/api/sms-inbox/ack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, ids: incoming.map((i) => i.id) }),
+          });
+
+          addToast(
+            `⚡ Captured ${brandNew.length} new debit SMS from iPhone!`,
+            'success'
+          );
+        }
+      } else if (isManual) {
+        addToast('No new debit SMS in queue. Everything is up to date!', 'info');
+      }
+    } catch {
+      if (isManual) {
+        addToast('Could not reach webhook server queue', 'error');
+      }
+    } finally {
+      if (isManual) {
+        setIsRefreshingWebhook(false);
+      }
+    }
+  }, [state.smsWebhookKey, state.pendingTransactions, state.transactions, user, addToast]);
+
+  // Periodic polling for incoming iPhone SMS (every 8 seconds when window is active)
+  useEffect(() => {
+    fetchSmsFromWebhookQueue(false);
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchSmsFromWebhookQueue(false);
+      }
+    }, 8000);
+
+    const handleFocus = () => fetchSmsFromWebhookQueue(false);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [fetchSmsFromWebhookQueue]);
+
+  const handleRegenerateWebhookKey = () => {
+    const newKey = generateWebhookKey();
+    setState((prev) => {
+      const next = { ...prev, smsWebhookKey: newKey };
+      if (user) {
+        saveUserSettingsToFirestore(user.uid, next);
+      }
+      return next;
+    });
+    addToast('New SMS Webhook key generated!', 'info');
+  };
+
+  const handleAddDirectPending = (item: PendingTransaction) => {
+    setState((prev) => ({
+      ...prev,
+      pendingTransactions: [item, ...(prev.pendingTransactions || [])],
+    }));
+    if (user) {
+      savePendingTransactionToFirestore(user.uid, item);
+    }
+    addToast(`Added ₹${item.amount} at ${item.title} to inbox!`, 'success');
+  };
+
+  const handleSendSimulatedSms = async (text: string) => {
+    try {
+      await fetch('/api/sms-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, key: state.smsWebhookKey }),
+      });
+      await fetchSmsFromWebhookQueue(false);
+      setIsPendingInboxOpen(true);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (
@@ -630,7 +1006,11 @@ export default function App() {
           handleUpdateSettings({ theme: state.theme === 'dark' ? 'light' : 'dark' })
         }
         onOpenAddModal={handleOpenAddTx}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenAuthModal={handleOpenLogin}
+        onOpenLogin={handleOpenLogin}
+        onOpenSignUp={handleOpenSignUp}
+        onOpenPendingInbox={() => setIsPendingInboxOpen(true)}
+        pendingCount={state.pendingTransactions?.length || 0}
       />
 
       {/* Main Container */}
@@ -643,11 +1023,14 @@ export default function App() {
             selectedMonth={selectedMonth}
             currency={state.currency}
             budgetLimit={state.budgetLimit}
+            pendingTransactions={state.pendingTransactions || []}
             onNavigateTab={(tab) => handleUpdateSettings({ activeTab: tab })}
             onOpenAddModal={handleOpenAddTx}
             onEditTransaction={handleEditTx}
             onDeleteTransaction={handleDeleteTransaction}
             onLogSubscription={handleLogSubscription}
+            onOpenPendingInbox={() => setIsPendingInboxOpen(true)}
+            onOpenShortcutGuide={() => setIsShortcutGuideOpen(true)}
           />
         )}
 
@@ -716,6 +1099,10 @@ export default function App() {
             onRestoreState={handleRestoreState}
             onResetAll={handleResetAll}
             onShowToast={addToast}
+            onOpenLogin={handleOpenLogin}
+            onOpenSignUp={handleOpenSignUp}
+            onOpenPendingInbox={() => setIsPendingInboxOpen(true)}
+            onOpenShortcutGuide={() => setIsShortcutGuideOpen(true)}
           />
         )}
       </main>
@@ -735,6 +1122,38 @@ export default function App() {
         activeTab={state.activeTab}
         onTabChange={(tab) => handleUpdateSettings({ activeTab: tab })}
         splitDebtsCount={splitDebtsCount}
+      />
+
+      {/* Pending Debit Review Inbox Modal */}
+      <PendingInboxModal
+        isOpen={isPendingInboxOpen}
+        onClose={() => setIsPendingInboxOpen(false)}
+        pendingTransactions={state.pendingTransactions || []}
+        categories={state.categories}
+        splitGroups={state.splitGroups || []}
+        friends={state.friends}
+        currency={state.currency}
+        existingTransactions={state.transactions}
+        onApproveSingle={handleApprovePendingSingle}
+        onApproveAll={handleApprovePendingAll}
+        onDismissSingle={handleDismissPendingSingle}
+        onDismissAll={handleDismissAllPending}
+        onUpdatePendingItem={handleUpdatePendingItem}
+        onImportCsv={handleImportCsv}
+        onAddDirectPending={handleAddDirectPending}
+        onOpenGuide={() => setIsShortcutGuideOpen(true)}
+        onRefreshWebhook={() => fetchSmsFromWebhookQueue(true)}
+        isRefreshing={isRefreshingWebhook}
+      />
+
+      {/* iPhone Shortcuts Automation Setup Guide Modal */}
+      <IPhoneShortcutGuideModal
+        isOpen={isShortcutGuideOpen}
+        onClose={() => setIsShortcutGuideOpen(false)}
+        smsWebhookKey={state.smsWebhookKey}
+        onRegenerateKey={handleRegenerateWebhookKey}
+        onSendSimulatedSms={handleSendSimulatedSms}
+        currency={state.currency}
       />
 
       {/* Transaction Modal (Form & Smart SMS auto-fill) */}
@@ -771,6 +1190,8 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         appName={state.appName}
+        initialMode={authModalMode}
+        onSuccess={(msg) => addToast(msg, 'success')}
       />
 
       {/* Splash Screen on Launch */}

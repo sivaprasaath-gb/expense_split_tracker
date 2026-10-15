@@ -13,11 +13,22 @@ import {
   Check, 
   Sun, 
   Moon,
-  X
+  X,
+  User as UserIcon,
+  LogIn,
+  LogOut,
+  UserPlus,
+  ShieldCheck,
+  Cloud,
+  Smartphone,
+  Inbox,
+  HelpCircle,
+  FileSpreadsheet
 } from 'lucide-react';
 import { AppState, Category } from '../types';
 import { SUPPORTED_CURRENCIES, formatCurrency, getCurrencySymbol } from '../utils/currency';
 import { exportToJsonFile, normalizeState } from '../utils/storage';
+import { useAuth } from '../utils/AuthContext';
 
 interface SettingsViewProps {
   state: AppState;
@@ -28,6 +39,10 @@ interface SettingsViewProps {
   onRestoreState: (importedState: AppState) => void;
   onResetAll: () => void;
   onShowToast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  onOpenLogin?: () => void;
+  onOpenSignUp?: () => void;
+  onOpenShortcutGuide?: () => void;
+  onOpenPendingInbox?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -39,7 +54,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onRestoreState,
   onResetAll,
   onShowToast,
+  onOpenLogin,
+  onOpenSignUp,
+  onOpenShortcutGuide,
+  onOpenPendingInbox,
 }) => {
+  const { user, logOut } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Category modal state
@@ -239,6 +259,96 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
+        {/* Account & Multi-User Profile Section */}
+        <div className="p-5 rounded-2xl border border-slate-800 light:border-slate-200 bg-slate-900/60 light:bg-white shadow-sm space-y-4">
+          <div className="flex items-center gap-2 border-b border-slate-800/80 light:border-slate-200 pb-3">
+            <UserIcon className="w-4 h-4 text-indigo-400" />
+            <h3 className="text-sm font-bold text-slate-100 light:text-slate-900">
+              Account & Cloud Sync
+            </h3>
+          </div>
+
+          {user ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-950/40 light:bg-slate-100 border border-slate-800 light:border-slate-200">
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || 'User'}
+                    className="w-11 h-11 rounded-xl object-cover ring-2 ring-indigo-500 shrink-0"
+                  />
+                ) : (
+                  <div className="w-11 h-11 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-base uppercase shrink-0">
+                    {(user.displayName || user.email || 'U')[0]}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-slate-100 light:text-slate-900 truncate">
+                      {user.displayName || 'Cloud User'}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold">
+                      Connected
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-400 truncate block">
+                    {user.email || 'No email associated'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs text-slate-400">
+                  Logged in via {user.providerData?.[0]?.providerId === 'google.com' ? 'Google Account' : 'Email/Password'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => logOut()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="p-3.5 rounded-xl bg-slate-950/40 light:bg-slate-100 border border-slate-800 light:border-slate-200 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 light:text-slate-700">
+                    Guest Mode (Local Offline Only)
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">
+                    Offline
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Log in or create a new account to back up your expenses in real-time, share split bills, and sync across your phone and laptop.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={onOpenLogin}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-slate-700 light:border-slate-300 bg-slate-800 light:bg-slate-100 hover:bg-slate-700 text-xs font-bold text-slate-200 light:text-slate-800 transition-colors cursor-pointer"
+                >
+                  <LogIn className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Log In</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenSignUp}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-md shadow-indigo-600/30 transition-colors cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Create Account</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Data Management Section */}
         <div className="p-5 rounded-2xl border border-slate-800 light:border-slate-200 bg-slate-900/60 light:bg-white shadow-sm space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-800/80 light:border-slate-200 pb-3">
@@ -321,6 +431,71 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* iPhone Direct SMS Debit Webhook Section */}
+        <div className="p-5 rounded-2xl border border-slate-800 light:border-slate-200 bg-slate-900/60 light:bg-white shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800/80 light:border-slate-200 pb-3">
+            <div className="flex items-center gap-2">
+              <Smartphone className="w-4 h-4 text-indigo-400" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-100 light:text-slate-900">
+                  Direct iPhone SMS Debit Webhook
+                </h3>
+                <p className="text-xs text-slate-400 light:text-slate-500">
+                  Capture bank & UPI debit SMS alerts straight from iOS Personal Automations
+                </p>
+              </div>
+            </div>
+
+            {state.pendingTransactions && state.pendingTransactions.length > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                {state.pendingTransactions.length} Pending
+              </span>
+            )}
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-950/40 light:bg-slate-100 border border-slate-800 light:border-slate-200 text-xs text-slate-300 light:text-slate-700 space-y-2.5">
+            <p>
+              Whenever your bank sends a debit or payment SMS, your iPhone Shortcut posts it silently to your dedicated webhook. No spreadsheet required!
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="text"
+                readOnly
+                value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/sms-webhook?key=${state.smsWebhookKey || ''}`}
+                className="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 light:bg-white border border-slate-800 light:border-slate-300 font-mono text-[11px] text-indigo-300 light:text-indigo-700 select-all truncate focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/api/sms-webhook?key=${state.smsWebhookKey || ''}`);
+                  onShowToast('Webhook URL copied to clipboard!', 'success');
+                }}
+                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors shrink-0 cursor-pointer"
+              >
+                Copy URL
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2 pt-1">
+            <button
+              onClick={onOpenPendingInbox}
+              className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-sm transition-all active:scale-95 cursor-pointer"
+            >
+              <Inbox className="w-4 h-4" />
+              <span>Open Pending Inbox {state.pendingTransactions && state.pendingTransactions.length > 0 ? `(${state.pendingTransactions.length})` : ''}</span>
+            </button>
+
+            <button
+              onClick={onOpenShortcutGuide}
+              className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-700 light:border-slate-300 bg-slate-800 light:bg-slate-100 text-xs font-bold text-slate-200 light:text-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
+            >
+              <HelpCircle className="w-4 h-4 text-indigo-400" />
+              <span>Shortcuts Setup & Simulator</span>
+            </button>
           </div>
         </div>
       </div>

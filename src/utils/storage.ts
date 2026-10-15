@@ -47,6 +47,15 @@ export const DEMO_SAMPLE_TRANSACTIONS: Transaction[] = [
   },
 ];
 
+export function generateWebhookKey(): string {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let rand = '';
+  for (let i = 0; i < 10; i++) {
+    rand += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `wbk_${rand}`;
+}
+
 export function getInitialState(): AppState {
   // Clear any legacy test data from prior revisions
   try {
@@ -85,6 +94,8 @@ export function getInitialState(): AppState {
     friends: [],
     splitExpenses: [],
     splitGroups: [],
+    pendingTransactions: [],
+    smsWebhookKey: generateWebhookKey(),
   };
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultState));
@@ -111,6 +122,8 @@ export function normalizeState(raw: Partial<AppState>): AppState {
     friends: Array.isArray(raw.friends) ? raw.friends : [],
     splitExpenses: Array.isArray(raw.splitExpenses) ? raw.splitExpenses : [],
     splitGroups: Array.isArray(raw.splitGroups) ? raw.splitGroups : [],
+    pendingTransactions: Array.isArray(raw.pendingTransactions) ? raw.pendingTransactions : [],
+    smsWebhookKey: raw.smsWebhookKey || generateWebhookKey(),
   };
 }
 

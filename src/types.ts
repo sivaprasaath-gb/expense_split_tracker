@@ -76,6 +76,25 @@ export interface FriendBalance {
   totalYouOwe: number;
 }
 
+export interface PendingTransaction {
+  id: string; // Deterministic fingerprint
+  title: string;
+  amount: number;
+  type: TransactionType;
+  category: string;
+  date: string; // YYYY-MM-DD
+  note?: string;
+  paymentMethod?: PaymentMethod;
+  source: 'iphone_shortcut' | 'sms_webhook' | 'csv_sync';
+  accountNumber?: string;
+  rawSms?: string;
+  rawRow?: Record<string, string>;
+  createdAt: number;
+  isSplit?: boolean;
+  splitGroupId?: string;
+  splitWithMemberIds?: string[];
+}
+
 export interface AppState {
   appName: string;
   currency: string;
@@ -88,4 +107,6 @@ export interface AppState {
   friends: Friend[];
   splitExpenses: SplitExpense[];
   splitGroups: SplitGroup[];
+  pendingTransactions?: PendingTransaction[];
+  smsWebhookKey?: string;
 }

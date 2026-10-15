@@ -13,9 +13,12 @@ import {
   Pencil, 
   Trash2,
   ChevronRight,
-  Plus
+  Plus,
+  Inbox,
+  ArrowRight,
+  Smartphone
 } from 'lucide-react';
-import { Transaction, Category, Subscription, AppState } from '../types';
+import { Transaction, Category, Subscription, AppState, PendingTransaction } from '../types';
 import { formatCurrency } from '../utils/currency';
 import { getMonthLabel, formatDisplayDate } from '../utils/storage';
 
@@ -26,11 +29,14 @@ interface DashboardViewProps {
   selectedMonth: string;
   currency: string;
   budgetLimit: number;
+  pendingTransactions?: PendingTransaction[];
   onNavigateTab: (tab: AppState['activeTab']) => void;
   onOpenAddModal: () => void;
   onEditTransaction: (t: Transaction) => void;
   onDeleteTransaction: (id: string) => void;
   onLogSubscription: (sub: Subscription) => void;
+  onOpenPendingInbox?: () => void;
+  onOpenShortcutGuide?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -40,11 +46,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   selectedMonth,
   currency,
   budgetLimit,
+  pendingTransactions = [],
   onNavigateTab,
   onOpenAddModal,
   onEditTransaction,
   onDeleteTransaction,
   onLogSubscription,
+  onOpenPendingInbox,
+  onOpenShortcutGuide,
 }) => {
   const [chartMode, setChartMode] = useState<'weekly' | 'daily'>('weekly');
   const [showAllRecent, setShowAllRecent] = useState(false);
@@ -207,6 +216,52 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Automated iPhone Debits Pending Banner */}
+      {pendingTransactions && pendingTransactions.length > 0 && (
+        <div className="p-4 sm:p-4.5 rounded-2xl border border-rose-500/30 bg-gradient-to-r from-rose-950/40 via-slate-900 to-indigo-950/30 light:from-rose-50 light:to-indigo-50 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-rose-500/20">
+              <Inbox className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-100 light:text-slate-900">
+                  {pendingTransactions.length} Automated Debit{pendingTransactions.length > 1 ? 's' : ''} Awaiting Review
+                </h3>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                  <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                  Direct SMS
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 light:text-slate-500 mt-0.5">
+                Total {formatCurrency(pendingTransactions.reduce((s, p) => s + p.amount, 0), currency)} captured via iPhone SMS & debit alerts. Confirm categories or split shares.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {onOpenShortcutGuide && (
+              <button
+                onClick={onOpenShortcutGuide}
+                className="px-3 py-2 rounded-xl bg-slate-800/80 light:bg-slate-200 hover:bg-slate-700 light:hover:bg-slate-300 text-slate-300 light:text-slate-700 text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                title="iPhone SMS Webhook Setup"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="hidden sm:inline">Webhook Setup</span>
+              </button>
+            )}
+
+            <button
+              onClick={onOpenPendingInbox}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md shadow-rose-600/20 transition-all active:scale-95 shrink-0 cursor-pointer"
+            >
+              <span>Review Inbox ({pendingTransactions.length})</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Monthly Budget Tracker Bar */}
       {budgetLimit > 0 && (

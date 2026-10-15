@@ -15,7 +15,8 @@ import {
   Category, 
   Friend, 
   SplitExpense, 
-  SplitGroup 
+  SplitGroup,
+  PendingTransaction
 } from '../types';
 import { DEFAULT_CATEGORIES } from './storage';
 
@@ -43,13 +44,14 @@ export async function syncUserProfile(uid: string, email: string, displayName?: 
 export function subscribeToUserData(
   uid: string,
   callbacks: {
-    onSettings: (settings: { appName?: string; currency?: string; budgetLimit?: number; theme?: 'dark' | 'light' }) => void;
+    onSettings: (settings: { appName?: string; currency?: string; budgetLimit?: number; theme?: 'dark' | 'light'; smsWebhookKey?: string }) => void;
     onTransactions: (txs: Transaction[]) => void;
     onCategories: (cats: Category[]) => void;
     onSubscriptions: (subs: Subscription[]) => void;
     onFriends: (friends: Friend[]) => void;
     onSplitGroups: (groups: SplitGroup[]) => void;
     onSplitExpenses: (expenses: SplitExpense[]) => void;
+    onPendingTransactions?: (pending: PendingTransaction[]) => void;
   }
 ): () => void {
   const unsubs: (() => void)[] = [];
@@ -66,6 +68,7 @@ export function subscribeToUserData(
           currency: data.currency,
           budgetLimit: data.budgetLimit,
           theme: data.theme,
+          smsWebhookKey: data.smsWebhookKey,
         });
       }
     },
@@ -240,6 +243,42 @@ export function subscribeToUserData(
   );
   unsubs.push(unsubExpenses);
 
+  // 8. Pending Transactions listener (iPhone / CSV Sync Inbox)
+  if (callbacks.onPendingTransactions) {
+    const pendingPath = `users/${uid}/pendingTransactions`;
+    const unsubPending = onSnapshot(
+      collection(db, 'users', uid, 'pendingTransactions'),
+      (snap) => {
+        const pending: PendingTransaction[] = [];
+        snap.forEach((docSnap) => {
+          const d = docSnap.data();
+          pending.push({
+            id: d.id || docSnap.id,
+            title: d.title || 'Debit Expense',
+            amount: Number(d.amount) || 0,
+            type: d.type === 'income' ? 'income' : 'expense',
+            category: d.category || 'other',
+            date: d.date || new Date().toISOString().slice(0, 10),
+            note: d.note || '',
+            paymentMethod: d.paymentMethod || 'UPI',
+            source: d.source || 'iphone_shortcut',
+            createdAt: Number(d.createdAt) || Date.now(),
+            isSplit: Boolean(d.isSplit),
+            splitGroupId: d.splitGroupId,
+            splitWithMemberIds: d.splitWithMemberIds,
+          });
+        });
+        // Sort newest first
+        pending.sort((a, b) => b.createdAt - a.createdAt);
+        callbacks.onPendingTransactions!(pending);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, pendingPath);
+      }
+    );
+    unsubs.push(unsubPending);
+  }
+
   return () => {
     unsubs.forEach((unsub) => unsub());
   };
@@ -251,13 +290,17 @@ export function subscribeToUserData(
 export async function saveUserSettingsToFirestore(uid: string, settings: Partial<AppState>) {
   const path = `users/${uid}/settings/main`;
   try {
-    await setDoc(doc(db, 'users', uid, 'settings', 'main'), {
+    const payload: Record<string, any> = {
       appName: settings.appName || 'VARAVU&SELAVU',
       currency: settings.currency || 'INR',
       budgetLimit: typeof settings.budgetLimit === 'number' ? settings.budgetLimit : 0,
       theme: settings.theme || 'dark',
       updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    };
+    if (settings.smsWebhookKey) {
+      payload.smsWebhookKey = settings.smsWebhookKey;
+    }
+    await setDoc(doc(db, 'users', uid, 'settings', 'main'), payload, { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -448,3 +491,61 @@ export async function migrateLocalStateToFirestore(uid: string, localState: AppS
     console.error('Failed to migrate state to Firestore:', err);
   }
 }
+
+/**
+ * Pending Transactions CRUD for iPhone / CSV Sync Inbox
+ */
+export async function savePendingTransactionToFirestore(uid: string, item: PendingTransaction) {
+  const path = `users/${uid}/pendingTransactions/${item.id}`;
+  try {
+    await setDoc(doc(db, 'users', uid, 'pendingTransactions', item.id), {
+      ...item,
+      userId: uid,
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function batchSavePendingTransactionsToFirestore(uid: string, items: PendingTransaction[]) {
+  if (!items.length) return;
+  const path = `users/${uid}/pendingTransactions`;
+  try {
+    const batch = writeBatch(db);
+    for (const item of items) {
+      const ref = doc(db, 'users', uid, 'pendingTransactions', item.id);
+      batch.set(ref, {
+        ...item,
+        userId: uid,
+      });
+    }
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function deletePendingTransactionFromFirestore(uid: string, pendingId: string) {
+  const path = `users/${uid}/pendingTransactions/${pendingId}`;
+  try {
+    await deleteDoc(doc(db, 'users', uid, 'pendingTransactions', pendingId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
+export async function clearAllPendingTransactionsFromFirestore(uid: string, items: PendingTransaction[]) {
+  if (!items.length) return;
+  const path = `users/${uid}/pendingTransactions`;
+  try {
+    const batch = writeBatch(db);
+    for (const item of items) {
+      const ref = doc(db, 'users', uid, 'pendingTransactions', item.id);
+      batch.delete(ref);
+    }
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
