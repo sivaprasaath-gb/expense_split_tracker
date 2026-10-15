@@ -895,7 +895,10 @@ export default function App() {
       const res = await fetch(inboxUrl);
       const contentType = res.headers.get('content-type') || '';
       if (!res.ok || !contentType.includes('application/json')) {
-        throw new Error('Server returned non-JSON response');
+        if (isManual) {
+          addToast('Webhook endpoint is not active on this domain yet. Deploy Firebase Functions or paste SMS directly.', 'info');
+        }
+        return;
       }
       const data = await res.json();
       const incoming: PendingTransaction[] = data.transactions || [];
@@ -934,8 +937,7 @@ export default function App() {
       }
     } catch {
       if (isManual) {
-        const serverHost = getApiBaseUrl(state.customWebhookServerUrl).replace(/^https?:\/\//, '');
-        addToast(`Could not reach webhook server queue (${serverHost})`, 'error');
+        addToast('Webhook endpoint is not active on this domain yet. Deploy Firebase Functions or paste SMS directly.', 'info');
       }
     } finally {
       if (isManual) {
