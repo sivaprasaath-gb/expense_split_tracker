@@ -20,6 +20,7 @@ import {
 import { formatCurrency } from '../utils/currency';
 import { generateSampleTransactionsCSV } from '../utils/csvSyncEngine';
 import { parseExpenseFromText } from '../utils/smartParser';
+import { getApiUrl, getApiBaseUrl } from '../utils/apiConfig';
 
 interface IPhoneShortcutGuideModalProps {
   isOpen: boolean;
@@ -28,6 +29,8 @@ interface IPhoneShortcutGuideModalProps {
   onRegenerateKey?: () => void;
   onSendSimulatedSms?: (text: string) => void;
   currency?: string;
+  customWebhookServerUrl?: string;
+  onUpdateServerUrl?: (url: string) => void;
 }
 
 const SAMPLE_SMS_TEMPLATES = [
@@ -60,6 +63,8 @@ export const IPhoneShortcutGuideModal: React.FC<IPhoneShortcutGuideModalProps> =
   onRegenerateKey,
   onSendSimulatedSms,
   currency = 'INR',
+  customWebhookServerUrl,
+  onUpdateServerUrl,
 }) => {
   const [activeTab, setActiveTab] = useState<'webhook' | 'simulator' | 'csv_backup'>('webhook');
   const [copiedUrl, setCopiedUrl] = useState(false);
@@ -68,12 +73,15 @@ export const IPhoneShortcutGuideModal: React.FC<IPhoneShortcutGuideModalProps> =
   const [simulatedResult, setSimulatedResult] = useState<any>(null);
   const [isSending, setIsSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
+  const [pingStatus, setPingStatus] = useState<{ testing: boolean; success?: boolean; msg?: string } | null>(null);
+  const [showServerConfig, setShowServerConfig] = useState(false);
+  const [serverUrlInput, setServerUrlInput] = useState(customWebhookServerUrl || '');
 
   if (!isOpen) return null;
 
-  // Webhook URL dynamically bound to current origin
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://your-app.run.app';
-  const webhookUrl = `${origin}/api/sms-webhook?key=${smsWebhookKey}`;
+  // Webhook URL resolved against active backend server
+  const activeBaseUrl = getApiBaseUrl(customWebhookServerUrl);
+  const webhookUrl = getApiUrl(`/api/sms-webhook?key=${smsWebhookKey}`, customWebhookServerUrl);
 
   const curlCommand = `curl -X POST "${webhookUrl}" \\
   -H "Content-Type: application/json" \\
@@ -96,13 +104,30 @@ export const IPhoneShortcutGuideModal: React.FC<IPhoneShortcutGuideModalProps> =
     setSimulatedResult(result);
   };
 
+  const handlePingServer = async () => {
+    setPingStatus({ testing: true });
+    try {
+      const pingUrl = getApiUrl('/api/sms-webhook/ping', customWebhookServerUrl);
+      const res = await fetch(pingUrl);
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        setPingStatus({ testing: false, success: true, msg: 'Server is active, online, and responding!' });
+      } else {
+        setPingStatus({ testing: false, success: false, msg: 'Server responded with unexpected status' });
+      }
+    } catch {
+      setPingStatus({ testing: false, success: false, msg: `Could not reach ${activeBaseUrl}` });
+    }
+  };
+
   const handleSendToInbox = async () => {
     setIsSending(true);
     try {
       if (onSendSimulatedSms) {
         onSendSimulatedSms(customSms);
       } else {
-        await fetch('/api/sms-webhook', {
+        const postUrl = getApiUrl('/api/sms-webhook', customWebhookServerUrl);
+        await fetch(postUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: customSms, key: smsWebhookKey }),
@@ -235,6 +260,27 @@ export const IPhoneShortcutGuideModal: React.FC<IPhoneShortcutGuideModalProps> =
                 <p className="text-[11px] text-slate-400 light:text-slate-500">
                   This private endpoint receives the SMS body from your iPhone and automatically registers it into your Pending Review inbox.
                 </p>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-indigo-500/15 text-[11px]">
+                  <div className="flex items-center gap-1.5 text-slate-400">
+                    <span>Server:</span>
+                    <span className="font-mono text-indigo-300 light:text-indigo-700 truncate max-w-[200px] sm:max-w-xs">{activeBaseUrl}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePingServer}
+                    disabled={pingStatus?.testing}
+                    className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer bg-slate-900/80 px-2 py-1 rounded-lg border border-indigo-500/30"
+                  >
+                    <Zap className="w-3 h-3 text-amber-300" />
+                    <span>{pingStatus?.testing ? 'Checking...' : 'Ping Server'}</span>
+                  </button>
+                </div>
+                {pingStatus && (
+                  <div className={`p-2 rounded-lg text-[11px] font-medium ${pingStatus.success ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'}`}>
+                    {pingStatus.success ? '🟢 ' : '🔴 '}{pingStatus.msg}
+                  </div>
+                )}
               </div>
 
               {/* Step by step iPhone Shortcut creation */}

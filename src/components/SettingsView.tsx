@@ -29,6 +29,7 @@ import { AppState, Category } from '../types';
 import { SUPPORTED_CURRENCIES, formatCurrency, getCurrencySymbol } from '../utils/currency';
 import { exportToJsonFile, normalizeState } from '../utils/storage';
 import { useAuth } from '../utils/AuthContext';
+import { getApiUrl, getApiBaseUrl } from '../utils/apiConfig';
 
 interface SettingsViewProps {
   state: AppState;
@@ -464,18 +465,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <input
                 type="text"
                 readOnly
-                value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/sms-webhook?key=${state.smsWebhookKey || ''}`}
+                value={getApiUrl(`/api/sms-webhook?key=${state.smsWebhookKey || ''}`, state.customWebhookServerUrl)}
                 className="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 light:bg-white border border-slate-800 light:border-slate-300 font-mono text-[11px] text-indigo-300 light:text-indigo-700 select-all truncate focus:outline-none"
               />
               <button
                 type="button"
                 onClick={() => {
-                  navigator.clipboard.writeText(`${window.location.origin}/api/sms-webhook?key=${state.smsWebhookKey || ''}`);
+                  const url = getApiUrl(`/api/sms-webhook?key=${state.smsWebhookKey || ''}`, state.customWebhookServerUrl);
+                  navigator.clipboard.writeText(url);
                   onShowToast('Webhook URL copied to clipboard!', 'success');
                 }}
                 className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors shrink-0 cursor-pointer"
               >
                 Copy URL
+              </button>
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+              <span>Webhook Server: <strong className="font-mono text-indigo-300 light:text-indigo-700">{getApiBaseUrl(state.customWebhookServerUrl).replace(/^https?:\/\//, '')}</strong></span>
+              <button
+                type="button"
+                onClick={onOpenShortcutGuide}
+                className="text-indigo-400 hover:text-indigo-300 underline font-medium cursor-pointer"
+              >
+                Test Connection & Ping
               </button>
             </div>
           </div>

@@ -69,6 +69,7 @@ export function subscribeToUserData(
           budgetLimit: data.budgetLimit,
           theme: data.theme,
           smsWebhookKey: data.smsWebhookKey,
+          customWebhookServerUrl: data.customWebhookServerUrl,
         });
       }
     },
@@ -299,6 +300,9 @@ export async function saveUserSettingsToFirestore(uid: string, settings: Partial
     };
     if (settings.smsWebhookKey) {
       payload.smsWebhookKey = settings.smsWebhookKey;
+    }
+    if (typeof settings.customWebhookServerUrl === 'string') {
+      payload.customWebhookServerUrl = settings.customWebhookServerUrl;
     }
     await setDoc(doc(db, 'users', uid, 'settings', 'main'), payload, { merge: true });
   } catch (err) {

@@ -38,6 +38,7 @@ import {
   clearAllPendingTransactionsFromFirestore
 } from './utils/firestoreSync';
 import { parseSpreadsheetTransactions } from './utils/csvSyncEngine';
+import { getApiUrl, getApiBaseUrl } from './utils/apiConfig';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { DashboardView } from './components/DashboardView';
@@ -890,8 +891,12 @@ export default function App() {
     }
 
     try {
-      const res = await fetch(`/api/sms-inbox?key=${encodeURIComponent(key)}`);
-      if (!res.ok) return;
+      const inboxUrl = getApiUrl(`/api/sms-inbox?key=${encodeURIComponent(key)}`, state.customWebhookServerUrl);
+      const res = await fetch(inboxUrl);
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        throw new Error('Server returned non-JSON response');
+      }
       const data = await res.json();
       const incoming: PendingTransaction[] = data.transactions || [];
 
@@ -912,7 +917,8 @@ export default function App() {
           }
 
           // Acknowledge these items so server queue clears them
-          await fetch('/api/sms-inbox/ack', {
+          const ackUrl = getApiUrl('/api/sms-inbox/ack', state.customWebhookServerUrl);
+          await fetch(ackUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key, ids: incoming.map((i) => i.id) }),
@@ -928,14 +934,15 @@ export default function App() {
       }
     } catch {
       if (isManual) {
-        addToast('Could not reach webhook server queue', 'error');
+        const serverHost = getApiBaseUrl(state.customWebhookServerUrl).replace(/^https?:\/\//, '');
+        addToast(`Could not reach webhook server queue (${serverHost})`, 'error');
       }
     } finally {
       if (isManual) {
         setIsRefreshingWebhook(false);
       }
     }
-  }, [state.smsWebhookKey, state.pendingTransactions, state.transactions, user, addToast]);
+  }, [state.smsWebhookKey, state.customWebhookServerUrl, state.pendingTransactions, state.transactions, user, addToast]);
 
   // Periodic polling for incoming iPhone SMS (every 8 seconds when window is active)
   useEffect(() => {
@@ -981,7 +988,8 @@ export default function App() {
 
   const handleSendSimulatedSms = async (text: string) => {
     try {
-      await fetch('/api/sms-webhook', {
+      const webhookUrl = getApiUrl('/api/sms-webhook', state.customWebhookServerUrl);
+      await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, key: state.smsWebhookKey }),
@@ -1154,6 +1162,8 @@ export default function App() {
         onRegenerateKey={handleRegenerateWebhookKey}
         onSendSimulatedSms={handleSendSimulatedSms}
         currency={state.currency}
+        customWebhookServerUrl={state.customWebhookServerUrl}
+        onUpdateServerUrl={(url) => handleUpdateSettings({ customWebhookServerUrl: url })}
       />
 
       {/* Transaction Modal (Form & Smart SMS auto-fill) */}

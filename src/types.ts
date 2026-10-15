@@ -109,4 +109,5 @@ export interface AppState {
   splitGroups: SplitGroup[];
   pendingTransactions?: PendingTransaction[];
   smsWebhookKey?: string;
+  customWebhookServerUrl?: string;
 }
