@@ -20,16 +20,12 @@ import {
   UserPlus,
   ShieldCheck,
   Cloud,
-  Smartphone,
-  Inbox,
-  HelpCircle,
   FileSpreadsheet
 } from 'lucide-react';
 import { AppState, Category } from '../types';
 import { SUPPORTED_CURRENCIES, formatCurrency, getCurrencySymbol } from '../utils/currency';
-import { exportToJsonFile, normalizeState } from '../utils/storage';
+import { exportToJsonFile, normalizeState, parseCsvTransactions } from '../utils/storage';
 import { useAuth } from '../utils/AuthContext';
-import { getApiUrl, getApiBaseUrl } from '../utils/apiConfig';
 
 interface SettingsViewProps {
   state: AppState;
@@ -127,7 +123,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsCatModalOpen(false);
   };
 
-  // JSON Import handler
+  // JSON / CSV Import handler
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -135,13 +131,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const parsed = JSON.parse(ev.target?.result as string);
-        const normalized = normalizeState(parsed);
-        onRestoreState(normalized);
-        onShowToast('Backup restored successfully!', 'success');
+        const text = (ev.target?.result as string) || '';
+        // If file is CSV or starts with CSV headers
+        if (file.name.endsWith('.csv') || text.trim().startsWith('Date,') || text.includes('Title / Merchant')) {
+          const parsed = parseCsvTransactions(text);
+          if (parsed.length === 0) {
+            onShowToast('No valid transactions found in CSV file.', 'error');
+            return;
+          }
+          const normalized = normalizeState(parsed);
+          onRestoreState(normalized);
+          onShowToast(`Successfully imported ${parsed.length} transactions from CSV!`, 'success');
+        } else {
+          const parsed = JSON.parse(text);
+          const normalized = normalizeState(parsed);
+          onRestoreState(normalized);
+          onShowToast('Backup restored successfully!', 'success');
+        }
       } catch (err) {
         console.error(err);
-        onShowToast('Invalid JSON file format.', 'error');
+        onShowToast('Invalid file format. Please upload a valid JSON or CSV backup.', 'error');
       }
     };
     reader.readAsText(file);
@@ -403,15 +412,64 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-700 light:border-slate-300 bg-slate-800 light:bg-slate-100 text-xs font-bold text-slate-200 light:text-slate-800 hover:bg-slate-700 transition-colors"
               >
                 <Upload className="w-4 h-4 text-emerald-400" />
-                <span>Import JSON Backup</span>
+                <span>Import JSON / CSV</span>
               </button>
               <input
                 type="file"
                 ref={fileInputRef}
-                accept=".json"
+                accept=".json,.csv"
                 onChange={handleImportFile}
                 className="hidden"
               />
+            </div>
+
+            {/* Ready-to-Upload Converted CSV/JSON Card */}
+            <div className="p-3.5 rounded-xl bg-slate-950/50 light:bg-slate-100 border border-slate-800 light:border-slate-300 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-slate-200 light:text-slate-800">
+                    Converted Oct 2026 Transactions (56 Records)
+                  </span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold">
+                  Ready
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 light:text-slate-600">
+                Your 56 transactions from October (Malaysian parota kadai, BSNL, Blinkit, Barevegan, Salary, etc.) have been converted to JSON.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/varavu-selavu-backup.json');
+                      if (!res.ok) throw new Error('File not found');
+                      const data = await res.json();
+                      const normalized = normalizeState(data);
+                      onRestoreState(normalized);
+                      onShowToast('⚡ 56 converted transactions loaded into ledger!', 'success');
+                    } catch (err) {
+                      console.error(err);
+                      onShowToast('Could not load converted transactions.', 'error');
+                    }
+                  }}
+                  className="flex-1 min-w-[140px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-sm"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>1-Click Load into App</span>
+                </button>
+
+                <a
+                  href="/varavu-selavu-backup.json"
+                  download="varavu-selavu-backup-2026-10-23.json"
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 light:border-slate-300 bg-slate-900 light:bg-white text-slate-200 light:text-slate-700 hover:bg-slate-800 text-xs font-semibold transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Download JSON</span>
+                </a>
+              </div>
             </div>
 
             <div className="pt-3 border-t border-slate-800 light:border-slate-200">
@@ -435,81 +493,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* iPhone Direct SMS Debit Webhook Section */}
-        <div className="p-5 rounded-2xl border border-slate-800 light:border-slate-200 bg-slate-900/60 light:bg-white shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800/80 light:border-slate-200 pb-3">
-            <div className="flex items-center gap-2">
-              <Smartphone className="w-4 h-4 text-indigo-400" />
-              <div>
-                <h3 className="text-sm font-bold text-slate-100 light:text-slate-900">
-                  Direct iPhone SMS Debit Webhook
-                </h3>
-                <p className="text-xs text-slate-400 light:text-slate-500">
-                  Capture bank & UPI debit SMS alerts straight from iOS Personal Automations
-                </p>
-              </div>
-            </div>
-
-            {state.pendingTransactions && state.pendingTransactions.length > 0 && (
-              <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">
-                {state.pendingTransactions.length} Pending
-              </span>
-            )}
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-slate-950/40 light:bg-slate-100 border border-slate-800 light:border-slate-200 text-xs text-slate-300 light:text-slate-700 space-y-2.5">
-            <p>
-              Whenever your bank sends a debit or payment SMS, your iPhone Shortcut posts it silently to your dedicated webhook. No spreadsheet required!
-            </p>
-            <div className="flex items-center gap-2 pt-1">
-              <input
-                type="text"
-                readOnly
-                value={getApiUrl(`/api/sms-webhook?key=${state.smsWebhookKey || ''}`, state.customWebhookServerUrl)}
-                className="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 light:bg-white border border-slate-800 light:border-slate-300 font-mono text-[11px] text-indigo-300 light:text-indigo-700 select-all truncate focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const url = getApiUrl(`/api/sms-webhook?key=${state.smsWebhookKey || ''}`, state.customWebhookServerUrl);
-                  navigator.clipboard.writeText(url);
-                  onShowToast('Webhook URL copied to clipboard!', 'success');
-                }}
-                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors shrink-0 cursor-pointer"
-              >
-                Copy URL
-              </button>
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-              <span>Webhook Server: <strong className="font-mono text-indigo-300 light:text-indigo-700">{getApiBaseUrl(state.customWebhookServerUrl).replace(/^https?:\/\//, '')}</strong></span>
-              <button
-                type="button"
-                onClick={onOpenShortcutGuide}
-                className="text-indigo-400 hover:text-indigo-300 underline font-medium cursor-pointer"
-              >
-                Test Connection & Ping
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-2 pt-1">
-            <button
-              onClick={onOpenPendingInbox}
-              className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-sm transition-all active:scale-95 cursor-pointer"
-            >
-              <Inbox className="w-4 h-4" />
-              <span>Open Pending Inbox {state.pendingTransactions && state.pendingTransactions.length > 0 ? `(${state.pendingTransactions.length})` : ''}</span>
-            </button>
-
-            <button
-              onClick={onOpenShortcutGuide}
-              className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-700 light:border-slate-300 bg-slate-800 light:bg-slate-100 text-xs font-bold text-slate-200 light:text-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
-            >
-              <HelpCircle className="w-4 h-4 text-indigo-400" />
-              <span>Shortcuts Setup & Simulator</span>
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* Categories Management Section */}

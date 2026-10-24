@@ -62,8 +62,6 @@ export const PendingInboxModal: React.FC<PendingInboxModalProps> = ({
   onImportCsv,
   onAddDirectPending,
   onOpenGuide,
-  onRefreshWebhook,
-  isRefreshing = false,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPasteBox, setShowPasteBox] = useState(false);
@@ -74,7 +72,7 @@ export const PendingInboxModal: React.FC<PendingInboxModalProps> = ({
   if (!isOpen) return null;
 
   const totalPendingAmount = pendingTransactions.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const webhookCount = pendingTransactions.filter(p => p.source === 'sms_webhook').length;
+  const autoCapturedCount = pendingTransactions.filter(p => p.source === 'sms_webhook' || p.source === 'iphone_shortcut').length;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -199,37 +197,26 @@ export const PendingInboxModal: React.FC<PendingInboxModalProps> = ({
                     {pendingTransactions.length}
                   </span>
                 )}
-                {webhookCount > 0 && (
+                {autoCapturedCount > 0 && (
                   <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                     <Zap className="w-3 h-3 text-amber-400" />
-                    <span>{webhookCount} via SMS Webhook</span>
+                    <span>{autoCapturedCount} via URL Shortcut</span>
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-400 light:text-slate-500">
                 {pendingTransactions.length > 0
                   ? `Review auto-captured debits before committing · Total: ${formatCurrency(totalPendingAmount, currency)}`
-                  : 'Zero unreviewed debits · Captured SMS messages appear here instantly'}
+                  : 'Zero unreviewed debits · Captured SMS transactions appear here instantly'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5">
-            {onRefreshWebhook && (
-              <button
-                onClick={onRefreshWebhook}
-                disabled={isRefreshing}
-                className="p-2 text-slate-400 hover:text-indigo-400 rounded-xl hover:bg-slate-800 light:hover:bg-slate-200 transition-colors cursor-pointer"
-                title="Check for new SMS from Webhook queue"
-              >
-                <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-indigo-400' : ''}`} />
-              </button>
-            )}
-
             <button
               onClick={onOpenGuide}
               className="p-2 text-slate-400 hover:text-indigo-400 rounded-xl hover:bg-slate-800 light:hover:bg-slate-200 transition-colors"
-              title="iPhone Shortcuts Webhook Setup Guide"
+              title="iPhone Shortcuts Direct URL Setup Guide"
             >
               <HelpCircle className="w-5 h-5" />
             </button>
@@ -344,7 +331,7 @@ export const PendingInboxModal: React.FC<PendingInboxModalProps> = ({
                   Inbox is Clean & Caught Up!
                 </h3>
                 <p className="text-xs text-slate-400 light:text-slate-500 mt-1">
-                  When your iPhone receives a debit SMS, it automatically sends it to your webhook and appears here for 1-tap review.
+                  When your iPhone receives a debit SMS, your iOS Shortcut opens your app URL to extract it here for 1-tap review.
                 </p>
               </div>
 
@@ -356,16 +343,6 @@ export const PendingInboxModal: React.FC<PendingInboxModalProps> = ({
                   <Zap className="w-4 h-4 text-amber-300" />
                   View iPhone Automation Setup
                 </button>
-                {onRefreshWebhook && (
-                  <button
-                    onClick={onRefreshWebhook}
-                    disabled={isRefreshing}
-                    className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 light:bg-slate-200 hover:bg-slate-700 light:hover:bg-slate-300 text-slate-300 light:text-slate-700 text-xs font-semibold transition-colors"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-                    Check Webhook Queue
-                  </button>
-                )}
               </div>
             </div>
           ) : (

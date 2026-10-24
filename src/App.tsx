@@ -38,6 +38,7 @@ import {
   clearAllPendingTransactionsFromFirestore
 } from './utils/firestoreSync';
 import { parseSpreadsheetTransactions } from './utils/csvSyncEngine';
+import { parseExpenseFromText } from './utils/smartParser';
 import { getApiUrl, getApiBaseUrl } from './utils/apiConfig';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
@@ -69,6 +70,19 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const hasMigratedRef = useRef<string | null>(null);
   const prevUserRef = useRef<string | null>(null);
+
+  // Toast helpers
+  const addToast = useCallback((text: string, type: ToastMessage['type'] = 'info') => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setToasts((prev) => [...prev, { id, text, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3200);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   // Auth modal openers
   const handleOpenLogin = useCallback(() => {
@@ -162,7 +176,18 @@ export default function App() {
         }));
       },
       onTransactions: (transactions) => {
-        setState((prev) => ({ ...prev, transactions }));
+        setState((prev) => {
+          // Prevent race condition: keep recent local transactions (created <15s ago) not yet in remote snapshot
+          const remoteMap = new Map(transactions.map((t) => [t.id, t]));
+          const now = Date.now();
+          const recentLocal = prev.transactions.filter(
+            (t) => !remoteMap.has(t.id) && now - (t.createdAt || 0) < 15000
+          );
+          return {
+            ...prev,
+            transactions: recentLocal.length > 0 ? [...recentLocal, ...transactions] : transactions,
+          };
+        });
       },
       onCategories: (categories) => {
         setState((prev) => ({ ...prev, categories }));
@@ -192,18 +217,98 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [state.activeTab]);
 
-  // Toast helper
-  const addToast = useCallback((text: string, type: ToastMessage['type'] = 'info') => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setToasts((prev) => [...prev, { id, text, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3200);
-  }, []);
+  // Direct URL Debit Capture (e.g. ?sms=... or ?amount=450&title=Coffee)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const smsParam = params.get('sms') || params.get('import_sms') || params.get('debit') || params.get('text');
+      const directAmount = params.get('amount');
+      const directTitle = params.get('title') || params.get('merchant');
 
-  const dismissToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
+      if (smsParam && smsParam.trim()) {
+        const decoded = decodeURIComponent(smsParam.trim());
+        const parsed = parseExpenseFromText(decoded);
+
+        if (parsed.amount > 0) {
+          const newItem: PendingTransaction = {
+            id: `url_sms_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            title: parsed.title,
+            amount: parsed.amount,
+            type: parsed.type,
+            category: parsed.category,
+            date: parsed.date,
+            paymentMethod: parsed.paymentMethod,
+            accountNumber: parsed.accountNumber,
+            source: 'sms_webhook',
+            rawSms: decoded,
+            note: parsed.accountNumber ? `${parsed.accountNumber} · Auto-captured via URL Shortcut` : 'Auto-captured via URL Shortcut',
+            createdAt: Date.now(),
+          };
+
+          setState((prev) => ({
+            ...prev,
+            pendingTransactions: [newItem, ...(prev.pendingTransactions || [])],
+          }));
+
+          if (user) {
+            savePendingTransactionToFirestore(user.uid, newItem);
+          }
+
+          setIsPendingInboxOpen(true);
+          addToast(`⚡ Captured ₹${parsed.amount} at ${parsed.title}!`, 'success');
+        }
+
+        // Clean query parameters so refreshing page doesn't re-add
+        params.delete('sms');
+        params.delete('import_sms');
+        params.delete('debit');
+        params.delete('text');
+        const cleanQuery = params.toString();
+        const cleanUrl = window.location.pathname + (cleanQuery ? `?${cleanQuery}` : '') + window.location.hash;
+        window.history.replaceState({}, '', cleanUrl);
+      } else if (directAmount && !isNaN(Number(directAmount))) {
+        const amt = Number(directAmount);
+        const title = directTitle || 'Expense';
+        const cat = params.get('category') || 'other';
+
+        const newItem: PendingTransaction = {
+          id: `url_tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          title,
+          amount: amt,
+          type: 'expense',
+          category: cat,
+          date: new Date().toISOString().slice(0, 10),
+          paymentMethod: (params.get('method') as any) || 'UPI',
+          source: 'sms_webhook',
+          note: 'Auto-captured via URL Shortcut',
+          createdAt: Date.now(),
+        };
+
+        setState((prev) => ({
+          ...prev,
+          pendingTransactions: [newItem, ...(prev.pendingTransactions || [])],
+        }));
+
+        if (user) {
+          savePendingTransactionToFirestore(user.uid, newItem);
+        }
+
+        setIsPendingInboxOpen(true);
+        addToast(`⚡ Captured ₹${amt} for ${title}!`, 'success');
+
+        params.delete('amount');
+        params.delete('title');
+        params.delete('merchant');
+        params.delete('category');
+        params.delete('method');
+        const cleanQuery = params.toString();
+        const cleanUrl = window.location.pathname + (cleanQuery ? `?${cleanQuery}` : '') + window.location.hash;
+        window.history.replaceState({}, '', cleanUrl);
+      }
+    } catch (e) {
+      console.error('URL capture error:', e);
+    }
+  }, [user, addToast]);
 
   // Available months list
   const availableMonths = useMemo(() => {
@@ -235,6 +340,8 @@ export default function App() {
       const existing = state.transactions.find((t) => t.id === existingId);
       const updatedTx: Transaction = {
         ...txData,
+        note: txData.note || '',
+        paymentMethod: txData.paymentMethod || 'Other',
         id: existingId,
         createdAt: existing?.createdAt || Date.now(),
       };
@@ -245,12 +352,16 @@ export default function App() {
         ),
       }));
       if (user) {
-        saveTransactionToFirestore(user.uid, updatedTx);
+        saveTransactionToFirestore(user.uid, updatedTx).catch((err) => {
+          console.error('Failed to save updated transaction to Firestore:', err);
+        });
       }
       addToast('Transaction updated', 'success');
     } else {
       const newTx: Transaction = {
         ...txData,
+        note: txData.note || '',
+        paymentMethod: txData.paymentMethod || 'Other',
         id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         createdAt: Date.now(),
       };
@@ -259,7 +370,9 @@ export default function App() {
         transactions: [newTx, ...prev.transactions],
       }));
       if (user) {
-        saveTransactionToFirestore(user.uid, newTx);
+        saveTransactionToFirestore(user.uid, newTx).catch((err) => {
+          console.error('Failed to save transaction to Firestore:', err);
+        });
       }
       // If transaction date is in another month, optionally update selectedMonth
       const txMonth = newTx.date.slice(0, 7);
@@ -640,6 +753,9 @@ export default function App() {
 
   const handleRestoreState = (importedState: AppState) => {
     setState(importedState);
+    if (user) {
+      migrateLocalStateToFirestore(user.uid, importedState);
+    }
     setSelectedMonth(getMonthKey(new Date()));
   };
 
@@ -880,103 +996,6 @@ export default function App() {
     }
   };
 
-  const [isRefreshingWebhook, setIsRefreshingWebhook] = useState(false);
-
-  const fetchSmsFromWebhookQueue = useCallback(async (isManual: boolean = false) => {
-    const key = state.smsWebhookKey;
-    if (!key) return;
-
-    if (isManual) {
-      setIsRefreshingWebhook(true);
-    }
-
-    try {
-      const inboxUrl = getApiUrl(`/api/sms-inbox?key=${encodeURIComponent(key)}`, state.customWebhookServerUrl);
-      const res = await fetch(inboxUrl);
-      const contentType = res.headers.get('content-type') || '';
-      if (!res.ok || !contentType.includes('application/json')) {
-        if (isManual) {
-          addToast('Webhook endpoint is not active on this domain yet. Deploy Firebase Functions or paste SMS directly.', 'info');
-        }
-        return;
-      }
-      const data = await res.json();
-      const incoming: PendingTransaction[] = data.transactions || [];
-
-      if (incoming.length > 0) {
-        const existingPendingIds = new Set((state.pendingTransactions || []).map((p) => p.id));
-        const existingTxIds = new Set(state.transactions.map((t) => t.id));
-
-        const brandNew = incoming.filter((item) => !existingPendingIds.has(item.id) && !existingTxIds.has(item.id));
-
-        if (brandNew.length > 0) {
-          setState((prev) => ({
-            ...prev,
-            pendingTransactions: [...brandNew, ...(prev.pendingTransactions || [])],
-          }));
-
-          if (user) {
-            batchSavePendingTransactionsToFirestore(user.uid, brandNew);
-          }
-
-          // Acknowledge these items so server queue clears them
-          const ackUrl = getApiUrl('/api/sms-inbox/ack', state.customWebhookServerUrl);
-          await fetch(ackUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key, ids: incoming.map((i) => i.id) }),
-          });
-
-          addToast(
-            `⚡ Captured ${brandNew.length} new debit SMS from iPhone!`,
-            'success'
-          );
-        }
-      } else if (isManual) {
-        addToast('No new debit SMS in queue. Everything is up to date!', 'info');
-      }
-    } catch {
-      if (isManual) {
-        addToast('Webhook endpoint is not active on this domain yet. Deploy Firebase Functions or paste SMS directly.', 'info');
-      }
-    } finally {
-      if (isManual) {
-        setIsRefreshingWebhook(false);
-      }
-    }
-  }, [state.smsWebhookKey, state.customWebhookServerUrl, state.pendingTransactions, state.transactions, user, addToast]);
-
-  // Periodic polling for incoming iPhone SMS (every 8 seconds when window is active)
-  useEffect(() => {
-    fetchSmsFromWebhookQueue(false);
-
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        fetchSmsFromWebhookQueue(false);
-      }
-    }, 8000);
-
-    const handleFocus = () => fetchSmsFromWebhookQueue(false);
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [fetchSmsFromWebhookQueue]);
-
-  const handleRegenerateWebhookKey = () => {
-    const newKey = generateWebhookKey();
-    setState((prev) => {
-      const next = { ...prev, smsWebhookKey: newKey };
-      if (user) {
-        saveUserSettingsToFirestore(user.uid, next);
-      }
-      return next;
-    });
-    addToast('New SMS Webhook key generated!', 'info');
-  };
-
   const handleAddDirectPending = (item: PendingTransaction) => {
     setState((prev) => ({
       ...prev,
@@ -988,18 +1007,34 @@ export default function App() {
     addToast(`Added ₹${item.amount} at ${item.title} to inbox!`, 'success');
   };
 
-  const handleSendSimulatedSms = async (text: string) => {
-    try {
-      const webhookUrl = getApiUrl('/api/sms-webhook', state.customWebhookServerUrl);
-      await fetch(webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, key: state.smsWebhookKey }),
-      });
-      await fetchSmsFromWebhookQueue(false);
+  const handleSendSimulatedSms = (text: string) => {
+    const parsed = parseExpenseFromText(text);
+    if (parsed.amount > 0) {
+      const newItem: PendingTransaction = {
+        id: `sim_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        title: parsed.title,
+        amount: parsed.amount,
+        type: parsed.type,
+        category: parsed.category,
+        date: parsed.date,
+        paymentMethod: parsed.paymentMethod,
+        accountNumber: parsed.accountNumber,
+        source: 'iphone_shortcut',
+        rawSms: text,
+        note: parsed.accountNumber ? `${parsed.accountNumber} · Direct URL Shortcut Simulator` : 'Direct URL Shortcut Simulator',
+        createdAt: Date.now(),
+      };
+      setState((prev) => ({
+        ...prev,
+        pendingTransactions: [newItem, ...(prev.pendingTransactions || [])],
+      }));
+      if (user) {
+        savePendingTransactionToFirestore(user.uid, newItem);
+      }
       setIsPendingInboxOpen(true);
-    } catch (err) {
-      console.error(err);
+      addToast(`⚡ Captured ₹${parsed.amount} at ${parsed.title}!`, 'success');
+    } else {
+      addToast('Could not extract a debit amount from the SMS.', 'error');
     }
   };
 
@@ -1152,20 +1187,14 @@ export default function App() {
         onImportCsv={handleImportCsv}
         onAddDirectPending={handleAddDirectPending}
         onOpenGuide={() => setIsShortcutGuideOpen(true)}
-        onRefreshWebhook={() => fetchSmsFromWebhookQueue(true)}
-        isRefreshing={isRefreshingWebhook}
       />
 
       {/* iPhone Shortcuts Automation Setup Guide Modal */}
       <IPhoneShortcutGuideModal
         isOpen={isShortcutGuideOpen}
         onClose={() => setIsShortcutGuideOpen(false)}
-        smsWebhookKey={state.smsWebhookKey}
-        onRegenerateKey={handleRegenerateWebhookKey}
         onSendSimulatedSms={handleSendSimulatedSms}
         currency={state.currency}
-        customWebhookServerUrl={state.customWebhookServerUrl}
-        onUpdateServerUrl={(url) => handleUpdateSettings({ customWebhookServerUrl: url })}
       />
 
       {/* Transaction Modal (Form & Smart SMS auto-fill) */}

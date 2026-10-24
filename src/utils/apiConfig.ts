@@ -12,7 +12,7 @@ export function getApiBaseUrl(customUrl?: string): string {
   }
 
   // 2. Build-time environment variable if configured (e.g. VITE_API_URL)
-  const envUrl = import.meta.env.VITE_API_URL;
+  const envUrl = (import.meta as any)?.env?.VITE_API_URL;
   if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
     return envUrl.trim().replace(/\/+$/, '');
   }

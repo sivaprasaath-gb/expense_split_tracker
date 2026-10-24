@@ -127,7 +127,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         category,
         date,
         paymentMethod,
-        note: note.trim() || undefined,
+        note: note.trim() || '',
       },
       initialTransaction ? initialTransaction.id : undefined
     );

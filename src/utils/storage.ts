@@ -6,6 +6,7 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'food', name: 'Food & Dining', icon: '🍔', color: '#f97316', budget: 0 },
   { id: 'shopping', name: 'Shopping', icon: '🛍️', color: '#ec4899', budget: 0 },
   { id: 'transport', name: 'Transport & Fuel', icon: '🚗', color: '#0ea5e9', budget: 0 },
+  { id: 'petrol', name: 'Petrol', icon: '⛽', color: '#0284c7', budget: 0 },
   { id: 'entertainment', name: 'Entertainment', icon: '🎮', color: '#8b5cf6', budget: 0 },
   { id: 'bills', name: 'Bills & Utilities', icon: '🧾', color: '#14b8a6', budget: 0 },
   { id: 'groceries', name: 'Groceries', icon: '🥦', color: '#22c55e', budget: 0 },
@@ -102,28 +103,83 @@ export function getInitialState(): AppState {
   return defaultState;
 }
 
-export function normalizeState(raw: Partial<AppState>): AppState {
-  const rawName = raw.appName?.trim();
+export function normalizeState(raw: any): AppState {
+  // If user passed a bare array of transactions directly [ { ... } ]
+  if (Array.isArray(raw)) {
+    const rawTxList = raw;
+    const cleanTransactions: Transaction[] = rawTxList.map((t: any, idx: number) => ({
+      id: t.id || `tx-${t.date ? String(t.date).replace(/-/g, '') : 'item'}-${idx + 1}`,
+      title: t.title || t['Title / Merchant'] || 'Untitled',
+      amount: Number(t.amount) || 0,
+      type: t.type === 'income' ? 'income' : 'expense',
+      category: t.category || 'other',
+      date: t.date || new Date().toISOString().slice(0, 10),
+      note: t.note || '',
+      paymentMethod: t.paymentMethod || 'Other',
+      createdAt: Number(t.createdAt) || (Date.now() - idx * 1000),
+    }));
+
+    return {
+      appName: 'VARAVU&SELAVU',
+      currency: 'INR',
+      budgetLimit: 0,
+      theme: 'dark',
+      activeTab: 'dashboard',
+      transactions: cleanTransactions,
+      categories: DEFAULT_CATEGORIES,
+      subscriptions: [],
+      friends: [],
+      splitExpenses: [],
+      splitGroups: [],
+      pendingTransactions: [],
+      smsWebhookKey: generateWebhookKey(),
+    };
+  }
+
+  const rawName = raw?.appName?.trim();
   const cleanName = (!rawName || rawName === 'Spendr' || rawName === 'VARU&SELAVU') 
     ? 'VARAVU&SELAVU' 
     : rawName;
 
+  const rawTxList = Array.isArray(raw?.transactions) ? raw.transactions : [];
+  const cleanTransactions: Transaction[] = rawTxList.map((t: any, idx: number) => ({
+    id: t.id || `tx-${t.date ? String(t.date).replace(/-/g, '') : 'item'}-${idx + 1}`,
+    title: t.title || t['Title / Merchant'] || 'Untitled',
+    amount: Number(t.amount) || 0,
+    type: t.type === 'income' ? 'income' : 'expense',
+    category: t.category || 'other',
+    date: t.date || new Date().toISOString().slice(0, 10),
+    note: t.note || '',
+    paymentMethod: t.paymentMethod || 'Other',
+    createdAt: Number(t.createdAt) || (Date.now() - idx * 1000),
+  }));
+
+  // Merge default categories with any existing or imported custom categories
+  const catList: Category[] = Array.isArray(raw?.categories) && raw.categories.length > 0
+    ? [...raw.categories]
+    : [...DEFAULT_CATEGORIES];
+
+  const catMap = new Map(catList.map((c) => [c.id, c]));
+  for (const defCat of DEFAULT_CATEGORIES) {
+    if (!catMap.has(defCat.id)) {
+      catList.push(defCat);
+    }
+  }
+
   return {
     appName: cleanName,
-    currency: raw.currency || 'INR',
-    budgetLimit: typeof raw.budgetLimit === 'number' ? raw.budgetLimit : 0,
-    theme: raw.theme === 'light' ? 'light' : 'dark',
-    activeTab: raw.activeTab || 'dashboard',
-    transactions: Array.isArray(raw.transactions) ? raw.transactions : [],
-    categories: Array.isArray(raw.categories) && raw.categories.length > 0
-      ? raw.categories
-      : DEFAULT_CATEGORIES,
-    subscriptions: Array.isArray(raw.subscriptions) ? raw.subscriptions : [],
-    friends: Array.isArray(raw.friends) ? raw.friends : [],
-    splitExpenses: Array.isArray(raw.splitExpenses) ? raw.splitExpenses : [],
-    splitGroups: Array.isArray(raw.splitGroups) ? raw.splitGroups : [],
-    pendingTransactions: Array.isArray(raw.pendingTransactions) ? raw.pendingTransactions : [],
-    smsWebhookKey: raw.smsWebhookKey || generateWebhookKey(),
+    currency: raw?.currency || 'INR',
+    budgetLimit: typeof raw?.budgetLimit === 'number' ? raw.budgetLimit : 0,
+    theme: raw?.theme === 'light' ? 'light' : 'dark',
+    activeTab: raw?.activeTab || 'dashboard',
+    transactions: cleanTransactions,
+    categories: catList,
+    subscriptions: Array.isArray(raw?.subscriptions) ? raw.subscriptions : [],
+    friends: Array.isArray(raw?.friends) ? raw.friends : [],
+    splitExpenses: Array.isArray(raw?.splitExpenses) ? raw.splitExpenses : [],
+    splitGroups: Array.isArray(raw?.splitGroups) ? raw.splitGroups : [],
+    pendingTransactions: Array.isArray(raw?.pendingTransactions) ? raw.pendingTransactions : [],
+    smsWebhookKey: raw?.smsWebhookKey || generateWebhookKey(),
   };
 }
 
@@ -246,3 +302,59 @@ export function exportTransactionsToCsv(transactions: Transaction[], categories:
   link.click();
   URL.revokeObjectURL(url);
 }
+
+export function parseCsvTransactions(csvText: string): Transaction[] {
+  const lines = csvText.trim().split(/\r?\n/);
+  if (lines.length <= 1) return [];
+
+  function parseLine(text: string): string[] {
+    const re = /(?:^|,)(?:"([^"]*(?:""[^"]*)*)"|([^",]*))/g;
+    const row: string[] = [];
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      const val = match[1] !== undefined ? match[1].replace(/""/g, '"') : match[2];
+      row.push(val);
+      if (match.index === re.lastIndex) re.lastIndex++;
+    }
+    return row;
+  }
+
+  const categoryMap: Record<string, string> = {
+    'Food & Dining': 'food',
+    'Bills & Utilities': 'bills',
+    'Groceries': 'groceries',
+    'Transport & Fuel': 'transport',
+    'Petrol': 'petrol',
+    'Entertainment': 'entertainment',
+    'Shopping': 'shopping',
+    'Health & Fitness': 'health',
+    'Salary & Income': 'salary',
+    'Other': 'other',
+  };
+
+  const transactions: Transaction[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseLine(lines[i]);
+    if (cols.length < 5) continue;
+    const [date, title, type, categoryName, amountStr, paymentMethod, note] = cols;
+    const catId = categoryMap[categoryName] || categoryName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const dateBase = new Date(date + 'T12:00:00Z').getTime() || Date.now();
+    const createdAt = dateBase + (lines.length - i) * 60000;
+
+    transactions.push({
+      id: `tx-${(date || '').replace(/-/g, '')}-${String(i).padStart(3, '0')}`,
+      title: title || 'Untitled',
+      amount: parseFloat(amountStr) || 0,
+      type: type === 'income' ? 'income' : 'expense',
+      category: catId,
+      date: date || new Date().toISOString().slice(0, 10),
+      note: note || '',
+      paymentMethod: (paymentMethod as any) || 'UPI',
+      createdAt: createdAt,
+    });
+  }
+
+  return transactions;
+}
+

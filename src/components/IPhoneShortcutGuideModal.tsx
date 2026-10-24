@@ -59,65 +59,21 @@ const SAMPLE_SMS_TEMPLATES = [
 export const IPhoneShortcutGuideModal: React.FC<IPhoneShortcutGuideModalProps> = ({
   isOpen,
   onClose,
-  smsWebhookKey = 'wbk_user123',
-  onRegenerateKey,
   onSendSimulatedSms,
   currency = 'INR',
-  customWebhookServerUrl,
-  onUpdateServerUrl,
 }) => {
-  const [activeTab, setActiveTab] = useState<'webhook' | 'simulator' | 'csv_backup'>('webhook');
-  const [copiedUrl, setCopiedUrl] = useState(false);
-  const [copiedCurl, setCopiedCurl] = useState(false);
+  const [activeTab, setActiveTab] = useState<'url_shortcut' | 'simulator' | 'csv_backup'>('url_shortcut');
+  const [copiedDirectUrl, setCopiedDirectUrl] = useState(false);
   const [customSms, setCustomSms] = useState(SAMPLE_SMS_TEMPLATES[0].text);
   const [simulatedResult, setSimulatedResult] = useState<any>(null);
   const [isSending, setIsSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
-  const [pingStatus, setPingStatus] = useState<{ testing: boolean; success?: boolean; msg?: string } | null>(null);
-  const [showServerConfig, setShowServerConfig] = useState(false);
-  const [serverUrlInput, setServerUrlInput] = useState(customWebhookServerUrl || '');
 
   if (!isOpen) return null;
-
-  // Webhook URL resolved against active backend server
-  const activeBaseUrl = getApiBaseUrl(customWebhookServerUrl);
-  const webhookUrl = getApiUrl(`/api/sms-webhook?key=${smsWebhookKey}`, customWebhookServerUrl);
-
-  const curlCommand = `curl -X POST "${webhookUrl}" \\
-  -H "Content-Type: application/json" \\
-  -d '{"message": "Dear Customer, INR 450.00 debited from A/c XX1234 at STARBUCKS via UPI"}'`;
-
-  const handleCopyUrl = () => {
-    navigator.clipboard.writeText(webhookUrl);
-    setCopiedUrl(true);
-    setTimeout(() => setCopiedUrl(false), 2200);
-  };
-
-  const handleCopyCurl = () => {
-    navigator.clipboard.writeText(curlCommand);
-    setCopiedCurl(true);
-    setTimeout(() => setCopiedCurl(false), 2200);
-  };
 
   const handleTestParse = () => {
     const result = parseExpenseFromText(customSms);
     setSimulatedResult(result);
-  };
-
-  const handlePingServer = async () => {
-    setPingStatus({ testing: true });
-    try {
-      const pingUrl = getApiUrl('/api/sms-webhook/ping', customWebhookServerUrl);
-      const res = await fetch(pingUrl);
-      const data = await res.json();
-      if (res.ok && data.status === 'ok') {
-        setPingStatus({ testing: false, success: true, msg: 'Server is active, online, and responding!' });
-      } else {
-        setPingStatus({ testing: false, success: false, msg: 'Server responded with unexpected status' });
-      }
-    } catch {
-      setPingStatus({ testing: false, success: false, msg: `Could not reach ${activeBaseUrl}` });
-    }
   };
 
   const handleSendToInbox = async () => {
@@ -125,13 +81,6 @@ export const IPhoneShortcutGuideModal: React.FC<IPhoneShortcutGuideModalProps> =
     try {
       if (onSendSimulatedSms) {
         onSendSimulatedSms(customSms);
-      } else {
-        const postUrl = getApiUrl('/api/sms-webhook', customWebhookServerUrl);
-        await fetch(postUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: customSms, key: smsWebhookKey }),
-        });
       }
       setSendSuccess(true);
       setTimeout(() => setSendSuccess(false), 3000);
@@ -178,17 +127,17 @@ export const IPhoneShortcutGuideModal: React.FC<IPhoneShortcutGuideModalProps> =
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-slate-800 light:border-slate-200 px-5 pt-2 bg-slate-900 light:bg-white text-xs font-semibold">
+        <div className="flex border-b border-slate-800 light:border-slate-200 px-5 pt-2 bg-slate-900 light:bg-white text-xs font-semibold overflow-x-auto">
           <button
-            onClick={() => setActiveTab('webhook')}
-            className={`pb-2.5 px-3 border-b-2 transition-all flex items-center gap-1.5 ${
-              activeTab === 'webhook'
+            onClick={() => setActiveTab('url_shortcut')}
+            className={`pb-2.5 px-3 border-b-2 transition-all flex items-center gap-1.5 shrink-0 ${
+              activeTab === 'url_shortcut'
                 ? 'border-indigo-500 text-indigo-400 light:text-indigo-600 font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-300'
             }`}
           >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>1. Shortcuts Setup</span>
+            <Zap className="w-3.5 h-3.5 text-amber-300" />
+            <span>1. Direct URL Shortcut</span>
           </button>
 
           <button
@@ -196,7 +145,7 @@ export const IPhoneShortcutGuideModal: React.FC<IPhoneShortcutGuideModalProps> =
               setActiveTab('simulator');
               if (!simulatedResult) handleTestParse();
             }}
-            className={`pb-2.5 px-3 border-b-2 transition-all flex items-center gap-1.5 ${
+            className={`pb-2.5 px-3 border-b-2 transition-all flex items-center gap-1.5 shrink-0 ${
               activeTab === 'simulator'
                 ? 'border-indigo-500 text-indigo-400 light:text-indigo-600 font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-300'
@@ -208,126 +157,114 @@ export const IPhoneShortcutGuideModal: React.FC<IPhoneShortcutGuideModalProps> =
 
           <button
             onClick={() => setActiveTab('csv_backup')}
-            className={`pb-2.5 px-3 border-b-2 transition-all flex items-center gap-1.5 ${
+            className={`pb-2.5 px-3 border-b-2 transition-all flex items-center gap-1.5 shrink-0 ${
               activeTab === 'csv_backup'
                 ? 'border-indigo-500 text-indigo-400 light:text-indigo-600 font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-300'
             }`}
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>3. Numbers / CSV (Backup)</span>
+            <span>3. Numbers / CSV</span>
           </button>
         </div>
 
         {/* Content Body */}
         <div className="p-5 overflow-y-auto space-y-4 text-sm text-slate-300 light:text-slate-700">
-          {activeTab === 'webhook' && (
+          {activeTab === 'url_shortcut' && (
             <div className="space-y-4">
-              {/* Personal Webhook URL Banner */}
-              <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-950/60 via-slate-900 to-slate-900/80 light:from-indigo-50 light:to-slate-100 border border-indigo-500/30 space-y-2.5">
+              {/* Highlight Hero Banner */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-slate-900 to-indigo-950/60 light:from-emerald-50 light:to-indigo-50 border border-emerald-500/30 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-bold text-indigo-300 light:text-indigo-700">
-                    <ShieldCheck className="w-4 h-4 text-indigo-400" />
-                    <span>Your Dedicated Webhook URL</span>
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 light:text-emerald-700">
+                    <Zap className="w-4 h-4 text-emerald-400" />
+                    <span>Zero-Server Direct URL Capture (Recommended)</span>
                   </div>
-                  {onRegenerateKey && (
-                    <button
-                      onClick={onRegenerateKey}
-                      className="text-[11px] text-slate-400 hover:text-indigo-400 flex items-center gap-1 transition-colors"
-                      title="Generate new webhook secret token"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      <span>Regenerate Key</span>
-                    </button>
-                  )}
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300">
+                    No Server Needed
+                  </span>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={webhookUrl}
-                    className="flex-1 px-3 py-2 rounded-xl bg-slate-950 light:bg-white border border-slate-800 light:border-slate-300 font-mono text-xs text-indigo-300 light:text-indigo-700 select-all truncate focus:outline-none"
-                  />
-                  <button
-                    onClick={handleCopyUrl}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
-                  >
-                    {copiedUrl ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    <span>{copiedUrl ? 'Copied!' : 'Copy URL'}</span>
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-400 light:text-slate-500">
-                  This private endpoint receives the SMS body from your iPhone and automatically registers it into your Pending Review inbox.
+                <p className="text-xs text-slate-300 light:text-slate-600 leading-relaxed">
+                  You don't need any webhook server or Cloud Functions! Your iPhone Shortcut simply opens your app URL with the bank SMS, and your app automatically extracts the amount, payee, and date into your <strong>Pending Review Inbox</strong>.
                 </p>
 
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-indigo-500/15 text-[11px]">
-                  <div className="flex items-center gap-1.5 text-slate-400">
-                    <span>Server:</span>
-                    <span className="font-mono text-indigo-300 light:text-indigo-700 truncate max-w-[200px] sm:max-w-xs">{activeBaseUrl}</span>
+                {/* URL Template Card */}
+                <div className="p-3 rounded-xl bg-slate-950 light:bg-white border border-slate-800 light:border-slate-300 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-slate-400">Shortcut URL Template:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const directUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://varaavuselaavu.web.app'}/?sms=Shortcut Input`;
+                        navigator.clipboard.writeText(directUrl);
+                        setCopiedDirectUrl(true);
+                        setTimeout(() => setCopiedDirectUrl(false), 2000);
+                      }}
+                      className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedDirectUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedDirectUrl ? 'Copied URL!' : 'Copy URL'}</span>
+                    </button>
                   </div>
+                  <div className="font-mono text-xs text-emerald-300 light:text-emerald-700 bg-slate-900 light:bg-slate-100 p-2.5 rounded-lg break-all select-all border border-slate-800 light:border-slate-300">
+                    {typeof window !== 'undefined' ? window.location.origin : 'https://varaavuselaavu.web.app'}/?sms=<span className="text-amber-400">[Shortcut Input]</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] text-slate-400">Want to see it in action right now?</span>
                   <button
                     type="button"
-                    onClick={handlePingServer}
-                    disabled={pingStatus?.testing}
-                    className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer bg-slate-900/80 px-2 py-1 rounded-lg border border-indigo-500/30"
+                    onClick={() => {
+                      const testUrl = `${window.location.pathname}?sms=${encodeURIComponent('Dear Customer, INR 450.00 debited from your A/c XX1234 on 15-OCT-26 to STARBUCKS via UPI.')}`;
+                      window.location.href = testUrl;
+                    }}
+                    className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/30"
                   >
-                    <Zap className="w-3 h-3 text-amber-300" />
-                    <span>{pingStatus?.testing ? 'Checking...' : 'Ping Server'}</span>
+                    <span>⚡ Test URL Capture Now</span>
                   </button>
                 </div>
-                {pingStatus && (
-                  <div className={`p-2 rounded-lg text-[11px] font-medium ${pingStatus.success ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'}`}>
-                    {pingStatus.success ? '🟢 ' : '🔴 '}{pingStatus.msg}
-                  </div>
-                )}
               </div>
 
-              {/* Step by step iPhone Shortcut creation */}
+              {/* 3 Step Guide */}
               <div className="space-y-3">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Configuring Apple Shortcuts (Takes 60 seconds):
+                  2-Minute iPhone Setup:
                 </h3>
 
                 {/* Step 1 */}
                 <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-slate-800/50 light:bg-slate-100 border border-slate-700/50 light:border-slate-200">
-                  <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                  <div className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
                     1
                   </div>
                   <div className="space-y-1">
                     <h4 className="font-semibold text-slate-100 light:text-slate-900 text-xs sm:text-sm">
-                      Create a Personal Automation
+                      Create an Automation in Apple Shortcuts
                     </h4>
                     <p className="text-xs text-slate-400 light:text-slate-600">
-                      Open <strong>Shortcuts</strong> on your iPhone $\rightarrow$ tap <strong>Automation</strong> at bottom $\rightarrow$ tap <strong>New Automation</strong> $\rightarrow$ choose <strong>Message</strong>.
+                      Open <strong>Shortcuts</strong> on iPhone → tap <strong>Automation</strong> at bottom → tap <strong>+ (New Automation)</strong>. Choose <strong>Message</strong>.
                     </p>
-                    <div className="p-2 rounded-xl bg-slate-900 light:bg-white text-slate-300 light:text-slate-800 text-[11px] font-mono border border-slate-700/40 light:border-slate-300">
-                      Message Contains: <span className="text-indigo-400 font-bold">debited</span> (or <span className="text-indigo-400 font-bold">spent</span>)<br />
-                      Run Immediately: <span className="text-emerald-400 font-bold">Turn ON</span><br />
-                      Notify When Run: <span className="text-slate-400 font-bold">Turn OFF</span>
+                    <div className="p-2.5 rounded-xl bg-slate-900/80 light:bg-white text-[11px] space-y-1 border border-slate-700/60 light:border-slate-300 font-mono">
+                      <div>• <strong>Message Contains:</strong> <span className="text-indigo-400">debited</span> (or your bank name)</div>
+                      <div>• <strong>Run:</strong> <span className="text-emerald-400">Run Immediately</span> (turn off "Ask Before Running")</div>
                     </div>
                   </div>
                 </div>
 
                 {/* Step 2 */}
                 <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-slate-800/50 light:bg-slate-100 border border-slate-700/50 light:border-slate-200">
-                  <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                  <div className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
                     2
                   </div>
-                  <div className="space-y-1.5 flex-1">
+                  <div className="space-y-1">
                     <h4 className="font-semibold text-slate-100 light:text-slate-900 text-xs sm:text-sm">
-                      Add "Get Contents of URL" Action
+                      Add "Open URLs" Action
                     </h4>
                     <p className="text-xs text-slate-400 light:text-slate-600">
-                      Tap <strong>New Blank Automation</strong> $\rightarrow$ Add Action $\rightarrow$ Search <strong>Get Contents of URL</strong>:
+                      Tap <strong>New Blank Automation</strong> → tap <strong>Add Action</strong> → search for <strong>Open URLs</strong>.
                     </p>
-                    <div className="p-2.5 rounded-xl bg-slate-900 light:bg-white text-[11px] font-mono border border-slate-700/40 light:border-slate-300 space-y-1">
-                      <div>URL: <span className="text-indigo-300 light:text-indigo-700 truncate block">{webhookUrl}</span></div>
-                      <div>Method: <span className="text-amber-400 font-bold">POST</span></div>
-                      <div>Request Body: <span className="text-emerald-400 font-bold">JSON</span></div>
-                      <div className="text-slate-400">
-                        Add field: Key = <strong className="text-slate-200 light:text-slate-800">message</strong> $\rightarrow$ Value = <strong className="text-indigo-400">Shortcut Input</strong>
-                      </div>
+                    <div className="p-2.5 rounded-xl bg-slate-900/80 light:bg-white text-[11px] space-y-1 border border-slate-700/60 light:border-slate-300 font-mono">
+                      <div>• <strong>URL:</strong> <span className="text-indigo-400">{typeof window !== 'undefined' ? window.location.origin : 'https://varaavuselaavu.web.app'}/?sms=</span><span className="text-amber-400">[Shortcut Input]</span></div>
+                      <div className="text-[10px] text-slate-400 pt-0.5">(Tap the blue pill at top of keyboard to select <em>Shortcut Input</em>)</div>
                     </div>
                   </div>
                 </div>
@@ -337,29 +274,20 @@ export const IPhoneShortcutGuideModal: React.FC<IPhoneShortcutGuideModalProps> =
                   <div className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
                     3
                   </div>
-                  <div>
+                  <div className="space-y-1">
                     <h4 className="font-semibold text-slate-100 light:text-slate-900 text-xs sm:text-sm">
-                      Done! Automatic Real-time Ingestion
+                      Done! Automatic 1-Tap Review
                     </h4>
-                    <p className="text-xs text-slate-400 light:text-slate-600 mt-0.5">
-                      Whenever you pay via UPI (GPay, PhonePe, Paytm) or swipe your bank card, iOS captures the debit SMS, transmits it directly to the webhook, and populates your Pending Review inbox!
+                    <p className="text-xs text-slate-400 light:text-slate-600">
+                      When your bank sends you a debit SMS, your iPhone automatically opens the app, parses the amount and payee, and places it in your <strong>Pending Review Inbox</strong> ready for 1-tap approval.
                     </p>
                   </div>
                 </div>
               </div>
-
-              {/* cURL preview toggle */}
-              <div className="pt-1">
-                <button
-                  onClick={handleCopyCurl}
-                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-400 transition-colors cursor-pointer"
-                >
-                  {copiedCurl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedCurl ? 'Copied cURL command!' : 'Copy cURL command to test via Terminal'}</span>
-                </button>
-              </div>
             </div>
           )}
+
+
 
           {activeTab === 'simulator' && (
             <div className="space-y-4">

@@ -44,7 +44,7 @@ export async function syncUserProfile(uid: string, email: string, displayName?: 
 export function subscribeToUserData(
   uid: string,
   callbacks: {
-    onSettings: (settings: { appName?: string; currency?: string; budgetLimit?: number; theme?: 'dark' | 'light'; smsWebhookKey?: string }) => void;
+    onSettings: (settings: { appName?: string; currency?: string; budgetLimit?: number; theme?: 'dark' | 'light'; smsWebhookKey?: string; customWebhookServerUrl?: string }) => void;
     onTransactions: (txs: Transaction[]) => void;
     onCategories: (cats: Category[]) => void;
     onSubscriptions: (subs: Subscription[]) => void;
@@ -286,6 +286,30 @@ export function subscribeToUserData(
 }
 
 /**
+ * Strips all undefined properties from an object so Firestore setDoc / updateDoc never fails.
+ * Firestore throws a fatal client error if any property value is `undefined`.
+ */
+export function cleanFirestorePayload<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const cleaned: Record<string, any> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== undefined) {
+      if (val !== null && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date)) {
+        cleaned[key] = cleanFirestorePayload(val);
+      } else if (Array.isArray(val)) {
+        cleaned[key] = val.map((item) =>
+          item !== null && typeof item === 'object' && !Array.isArray(item)
+            ? cleanFirestorePayload(item)
+            : item
+        );
+      } else {
+        cleaned[key] = val;
+      }
+    }
+  }
+  return cleaned;
+}
+
+/**
  * Save settings to Firestore
  */
 export async function saveUserSettingsToFirestore(uid: string, settings: Partial<AppState>) {
@@ -304,7 +328,7 @@ export async function saveUserSettingsToFirestore(uid: string, settings: Partial
     if (typeof settings.customWebhookServerUrl === 'string') {
       payload.customWebhookServerUrl = settings.customWebhookServerUrl;
     }
-    await setDoc(doc(db, 'users', uid, 'settings', 'main'), payload, { merge: true });
+    await setDoc(doc(db, 'users', uid, 'settings', 'main'), cleanFirestorePayload(payload), { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -316,10 +340,19 @@ export async function saveUserSettingsToFirestore(uid: string, settings: Partial
 export async function saveTransactionToFirestore(uid: string, tx: Transaction) {
   const path = `users/${uid}/transactions/${tx.id}`;
   try {
-    await setDoc(doc(db, 'users', uid, 'transactions', tx.id), {
-      ...tx,
+    const payload = cleanFirestorePayload({
+      id: tx.id,
+      title: tx.title || 'Untitled',
+      amount: Number(tx.amount) || 0,
+      type: tx.type === 'income' ? 'income' : 'expense',
+      category: tx.category || 'other',
+      date: tx.date || new Date().toISOString().slice(0, 10),
+      note: tx.note || '',
+      paymentMethod: tx.paymentMethod || 'Other',
+      createdAt: Number(tx.createdAt) || Date.now(),
       userId: uid,
     });
+    await setDoc(doc(db, 'users', uid, 'transactions', tx.id), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -340,10 +373,15 @@ export async function deleteTransactionFromFirestore(uid: string, txId: string) 
 export async function saveCategoryToFirestore(uid: string, cat: Category) {
   const path = `users/${uid}/categories/${cat.id}`;
   try {
-    await setDoc(doc(db, 'users', uid, 'categories', cat.id), {
-      ...cat,
+    const payload = cleanFirestorePayload({
+      id: cat.id,
+      name: cat.name || 'Category',
+      icon: cat.icon || '🏷️',
+      color: cat.color || '#6366f1',
+      budget: Number(cat.budget) || 0,
       userId: uid,
     });
+    await setDoc(doc(db, 'users', uid, 'categories', cat.id), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -364,10 +402,17 @@ export async function deleteCategoryFromFirestore(uid: string, catId: string) {
 export async function saveSubscriptionToFirestore(uid: string, sub: Subscription) {
   const path = `users/${uid}/subscriptions/${sub.id}`;
   try {
-    await setDoc(doc(db, 'users', uid, 'subscriptions', sub.id), {
-      ...sub,
+    const payload = cleanFirestorePayload({
+      id: sub.id,
+      name: sub.name || 'Subscription',
+      amount: Number(sub.amount) || 0,
+      day: Number(sub.day) || 1,
+      category: sub.category || 'bills',
+      active: typeof sub.active === 'boolean' ? sub.active : true,
+      notes: sub.notes || '',
       userId: uid,
     });
+    await setDoc(doc(db, 'users', uid, 'subscriptions', sub.id), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -388,10 +433,14 @@ export async function deleteSubscriptionFromFirestore(uid: string, subId: string
 export async function saveFriendToFirestore(uid: string, friend: Friend) {
   const path = `users/${uid}/friends/${friend.id}`;
   try {
-    await setDoc(doc(db, 'users', uid, 'friends', friend.id), {
-      ...friend,
+    const payload = cleanFirestorePayload({
+      id: friend.id,
+      name: friend.name || 'Friend',
+      note: friend.note || '',
+      avatarColor: friend.avatarColor || '#6366f1',
       userId: uid,
     });
+    await setDoc(doc(db, 'users', uid, 'friends', friend.id), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -412,10 +461,18 @@ export async function deleteFriendFromFirestore(uid: string, friendId: string) {
 export async function saveSplitGroupToFirestore(uid: string, group: SplitGroup) {
   const path = `users/${uid}/splitGroups/${group.id}`;
   try {
-    await setDoc(doc(db, 'users', uid, 'splitGroups', group.id), {
-      ...group,
+    const payload = cleanFirestorePayload({
+      id: group.id,
+      name: group.name || 'Group',
+      description: group.description || '',
+      icon: group.icon || '✈️',
+      memberIds: Array.isArray(group.memberIds) ? group.memberIds : ['YOU'],
+      status: group.status || 'active',
+      createdAt: Number(group.createdAt) || Date.now(),
+      closedAt: group.closedAt ? Number(group.closedAt) : null,
       userId: uid,
     });
+    await setDoc(doc(db, 'users', uid, 'splitGroups', group.id), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -436,10 +493,20 @@ export async function deleteSplitGroupFromFirestore(uid: string, groupId: string
 export async function saveSplitExpenseToFirestore(uid: string, expense: SplitExpense) {
   const path = `users/${uid}/splitExpenses/${expense.id}`;
   try {
-    await setDoc(doc(db, 'users', uid, 'splitExpenses', expense.id), {
-      ...expense,
+    const payload = cleanFirestorePayload({
+      id: expense.id,
+      groupId: expense.groupId || '',
+      title: expense.title || 'Expense',
+      amount: Number(expense.amount) || 0,
+      date: expense.date || new Date().toISOString().slice(0, 10),
+      paidBy: expense.paidBy || 'YOU',
+      paidByName: expense.paidByName || 'You',
+      shares: Array.isArray(expense.shares) ? expense.shares : [],
+      note: expense.note || '',
+      isSettlement: Boolean(expense.isSettlement),
       userId: uid,
     });
+    await setDoc(doc(db, 'users', uid, 'splitExpenses', expense.id), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -502,10 +569,11 @@ export async function migrateLocalStateToFirestore(uid: string, localState: AppS
 export async function savePendingTransactionToFirestore(uid: string, item: PendingTransaction) {
   const path = `users/${uid}/pendingTransactions/${item.id}`;
   try {
-    await setDoc(doc(db, 'users', uid, 'pendingTransactions', item.id), {
+    const payload = cleanFirestorePayload({
       ...item,
       userId: uid,
     });
+    await setDoc(doc(db, 'users', uid, 'pendingTransactions', item.id), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -518,10 +586,11 @@ export async function batchSavePendingTransactionsToFirestore(uid: string, items
     const batch = writeBatch(db);
     for (const item of items) {
       const ref = doc(db, 'users', uid, 'pendingTransactions', item.id);
-      batch.set(ref, {
+      const payload = cleanFirestorePayload({
         ...item,
         userId: uid,
       });
+      batch.set(ref, payload);
     }
     await batch.commit();
   } catch (err) {
