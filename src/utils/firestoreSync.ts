@@ -4,7 +4,8 @@ import {
   setDoc, 
   deleteDoc, 
   onSnapshot, 
-  writeBatch 
+  writeBatch,
+  getDocs
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { handleFirestoreError, OperationType } from './firestoreErrors';
@@ -626,4 +627,64 @@ export async function clearAllPendingTransactionsFromFirestore(uid: string, item
     handleFirestoreError(err, OperationType.DELETE, path);
   }
 }
+
+/**
+ * Delete all documents in a subcollection under a user in batches
+ */
+async function deleteSubcollection(uid: string, subcollectionName: string) {
+  const path = `users/${uid}/${subcollectionName}`;
+  try {
+    const colRef = collection(db, 'users', uid, subcollectionName);
+    const snap = await getDocs(colRef);
+    if (snap.empty) return;
+
+    const docs = snap.docs;
+    // Commit in chunks of 400 (well within Firestore 500 batch limit)
+    for (let i = 0; i < docs.length; i += 400) {
+      const chunk = docs.slice(i, i + 400);
+      const batch = writeBatch(db);
+      for (const d of chunk) {
+        batch.delete(d.ref);
+      }
+      await batch.commit();
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
+/**
+ * Clear all stored data for the user from Firestore:
+ * Erases all transactions, subscriptions, friends, split groups, split expenses,
+ * pending items, custom categories, and resets cloud settings.
+ */
+export async function clearAllUserDataFromFirestore(uid: string) {
+  const subcollections = [
+    'transactions',
+    'subscriptions',
+    'friends',
+    'splitGroups',
+    'splitExpenses',
+    'pendingTransactions',
+    'categories',
+  ];
+
+  for (const sub of subcollections) {
+    await deleteSubcollection(uid, sub);
+  }
+
+  // Reset settings in Firestore
+  await saveUserSettingsToFirestore(uid, {
+    appName: 'VARAVU&SELAVU',
+    currency: 'INR',
+    budgetLimit: 0,
+    theme: 'dark',
+  });
+
+  // Re-seed default categories so the user has the baseline categories ready
+  for (const cat of DEFAULT_CATEGORIES) {
+    await saveCategoryToFirestore(uid, cat);
+  }
+}
+
 

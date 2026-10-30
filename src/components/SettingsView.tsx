@@ -522,7 +522,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div>
                   <span className="text-xs font-bold text-rose-400 block">Clear All Stored Data</span>
                   <span className="text-[11px] text-slate-400">
-                    Wipe all records to deliver a fresh, clean slate
+                    {user ? 'Wipe all records across this device and your Firebase Cloud database' : 'Wipe all records to deliver a fresh, clean slate'}
                   </span>
                 </div>
 

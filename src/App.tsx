@@ -35,7 +35,8 @@ import {
   savePendingTransactionToFirestore,
   batchSavePendingTransactionsToFirestore,
   deletePendingTransactionFromFirestore,
-  clearAllPendingTransactionsFromFirestore
+  clearAllPendingTransactionsFromFirestore,
+  clearAllUserDataFromFirestore
 } from './utils/firestoreSync';
 import { parseSpreadsheetTransactions } from './utils/csvSyncEngine';
 import { parseExpenseFromText } from './utils/smartParser';
@@ -800,10 +801,12 @@ export default function App() {
     setConfirmModal({
       isOpen: true,
       title: 'Clear All Data',
-      message: 'Are you sure you want to clear all stored data? This will permanently erase all transactions, recurring payments, friends, and split expenses, giving you a fresh, clean ledger.',
+      message: user
+        ? 'Are you sure you want to clear all stored data? This will permanently erase all transactions, recurring payments, friends, split expenses, and pending inbox items from BOTH your device and your Firebase Cloud database.'
+        : 'Are you sure you want to clear all stored data? This will permanently erase all transactions, recurring payments, friends, and split expenses, giving you a fresh, clean ledger.',
       confirmLabel: 'Clear All Data',
       isDestructive: true,
-      onConfirm: () => {
+      onConfirm: async () => {
         const resetState: AppState = {
           appName: 'VARAVU&SELAVU',
           currency: 'INR',
@@ -819,8 +822,20 @@ export default function App() {
           pendingTransactions: [],
         };
         setState(resetState);
+        saveState(resetState);
         setSelectedMonth(getMonthKey(new Date()));
-        addToast('All data cleared successfully. Fresh start ready!', 'info');
+
+        if (user) {
+          try {
+            await clearAllUserDataFromFirestore(user.uid);
+            addToast('All data cleared from local device and Firebase Cloud!', 'info');
+          } catch (err) {
+            console.error('Failed to clear cloud data:', err);
+            addToast('Local data cleared, but encountered an error clearing cloud data', 'error');
+          }
+        } else {
+          addToast('All data cleared successfully. Fresh start ready!', 'info');
+        }
       },
     });
   };
