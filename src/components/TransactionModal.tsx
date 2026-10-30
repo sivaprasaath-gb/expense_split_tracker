@@ -45,15 +45,20 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const currencySymbol = getCurrencySymbol(currency);
 
   useEffect(() => {
-    if (initialTransaction) {
-      setType(initialTransaction.type);
-      setAmount(initialTransaction.amount.toString());
-      setTitle(initialTransaction.title);
-      setCategory(initialTransaction.category);
-      setDate(initialTransaction.date);
-      setPaymentMethod(initialTransaction.paymentMethod || 'UPI');
-      setNote(initialTransaction.note || '');
-      setMode('form');
+    if (isOpen) {
+      if (initialTransaction) {
+        setType(initialTransaction.type);
+        setAmount(initialTransaction.amount.toString());
+        setTitle(initialTransaction.title);
+        setCategory(initialTransaction.category);
+        setDate(initialTransaction.date);
+        setPaymentMethod(initialTransaction.paymentMethod || 'UPI');
+        setNote(initialTransaction.note || '');
+        setMode('form');
+        setError('');
+      } else {
+        resetForm();
+      }
     } else {
       resetForm();
     }

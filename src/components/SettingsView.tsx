@@ -24,7 +24,12 @@ import {
 } from 'lucide-react';
 import { AppState, Category } from '../types';
 import { SUPPORTED_CURRENCIES, formatCurrency, getCurrencySymbol } from '../utils/currency';
-import { exportToJsonFile, normalizeState, parseCsvTransactions } from '../utils/storage';
+import { 
+  exportToJsonFile, 
+  exportTransactionsToCsv, 
+  normalizeState, 
+  parseCsvTransactions 
+} from '../utils/storage';
 import { useAuth } from '../utils/AuthContext';
 
 interface SettingsViewProps {
@@ -57,7 +62,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onOpenPendingInbox,
 }) => {
   const { user, logOut } = useAuth();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonFileInputRef = useRef<HTMLInputElement>(null);
+  const csvFileInputRef = useRef<HTMLInputElement>(null);
 
   // Category modal state
   const [isCatModalOpen, setIsCatModalOpen] = useState(false);
@@ -123,8 +129,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsCatModalOpen(false);
   };
 
-  // JSON / CSV Import handler
-  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // JSON Backup Import handler
+  const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -132,29 +138,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     reader.onload = (ev) => {
       try {
         const text = (ev.target?.result as string) || '';
-        // If file is CSV or starts with CSV headers
-        if (file.name.endsWith('.csv') || text.trim().startsWith('Date,') || text.includes('Title / Merchant')) {
-          const parsed = parseCsvTransactions(text);
-          if (parsed.length === 0) {
-            onShowToast('No valid transactions found in CSV file.', 'error');
-            return;
-          }
-          const normalized = normalizeState(parsed);
-          onRestoreState(normalized);
-          onShowToast(`Successfully imported ${parsed.length} transactions from CSV!`, 'success');
-        } else {
-          const parsed = JSON.parse(text);
-          const normalized = normalizeState(parsed);
-          onRestoreState(normalized);
-          onShowToast('Backup restored successfully!', 'success');
-        }
+        const parsed = JSON.parse(text);
+        const normalized = normalizeState(parsed);
+        onRestoreState(normalized);
+        const count = normalized.transactions.length;
+        onShowToast(`JSON backup restored successfully (${count} transactions)!`, 'success');
       } catch (err) {
         console.error(err);
-        onShowToast('Invalid file format. Please upload a valid JSON or CSV backup.', 'error');
+        onShowToast('Invalid JSON file. Please upload a valid JSON backup.', 'error');
       }
     };
     reader.readAsText(file);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (jsonFileInputRef.current) jsonFileInputRef.current.value = '';
+  };
+
+  // CSV Transactions Upload handler
+  const handleUploadCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = (ev.target?.result as string) || '';
+        const parsed = parseCsvTransactions(text);
+        if (parsed.length === 0) {
+          onShowToast('No valid transactions found in the CSV file.', 'error');
+          return;
+        }
+        const normalized = normalizeState(parsed);
+        onRestoreState(normalized);
+        onShowToast(`Successfully imported ${parsed.length} transactions from CSV!`, 'success');
+      } catch (err) {
+        console.error(err);
+        onShowToast('Invalid CSV format. Please upload a valid CSV file.', 'error');
+      }
+    };
+    reader.readAsText(file);
+    if (csvFileInputRef.current) csvFileInputRef.current.value = '';
   };
 
   return (
@@ -392,84 +413,108 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <p className="text-xs text-slate-400 leading-relaxed">
-              You can also export instant offline JSON backups or restore existing backups across machines at any time.
+              Export and import your ledger data at any time via offline JSON backups or standard CSV spreadsheets.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-2">
+            {/* 4 Dedicated Actions: Export JSON, Import JSON, Download CSV, Upload CSV */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              {/* 1. Export JSON */}
               <button
+                type="button"
                 onClick={() => {
                   exportToJsonFile(state);
-                  onShowToast('JSON backup downloaded', 'success');
+                  onShowToast('JSON backup exported', 'success');
                 }}
-                className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-700 light:border-slate-300 bg-slate-800 light:bg-slate-100 text-xs font-bold text-slate-200 light:text-slate-800 hover:bg-slate-700 transition-colors"
+                className="flex items-center gap-3 p-3.5 rounded-xl border border-slate-800 light:border-slate-300 bg-slate-950/60 light:bg-slate-100 hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all text-left group cursor-pointer"
               >
-                <Download className="w-4 h-4 text-indigo-400" />
-                <span>Export JSON Backup</span>
-              </button>
-
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-700 light:border-slate-300 bg-slate-800 light:bg-slate-100 text-xs font-bold text-slate-200 light:text-slate-800 hover:bg-slate-700 transition-colors"
-              >
-                <Upload className="w-4 h-4 text-emerald-400" />
-                <span>Import JSON / CSV</span>
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept=".json,.csv"
-                onChange={handleImportFile}
-                className="hidden"
-              />
-            </div>
-
-            {/* Ready-to-Upload Converted CSV/JSON Card */}
-            <div className="p-3.5 rounded-xl bg-slate-950/50 light:bg-slate-100 border border-slate-800 light:border-slate-300 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-                  <span className="text-xs font-bold text-slate-200 light:text-slate-800">
-                    Converted Oct 2026 Transactions (56 Records)
+                <div className="w-10 h-10 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <Download className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-slate-100 light:text-slate-900 block">
+                    Export JSON
+                  </span>
+                  <span className="text-[11px] text-slate-400 block truncate">
+                    Download complete app backup (.json)
                   </span>
                 </div>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold">
-                  Ready
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 light:text-slate-600">
-                Your 56 transactions from October (Malaysian parota kadai, BSNL, Blinkit, Barevegan, Salary, etc.) have been converted to JSON.
-              </p>
-              <div className="flex flex-wrap gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      const res = await fetch('/varavu-selavu-backup.json');
-                      if (!res.ok) throw new Error('File not found');
-                      const data = await res.json();
-                      const normalized = normalizeState(data);
-                      onRestoreState(normalized);
-                      onShowToast('⚡ 56 converted transactions loaded into ledger!', 'success');
-                    } catch (err) {
-                      console.error(err);
-                      onShowToast('Could not load converted transactions.', 'error');
-                    }
-                  }}
-                  className="flex-1 min-w-[140px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-sm"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>1-Click Load into App</span>
-                </button>
+              </button>
 
-                <a
-                  href="/varavu-selavu-backup.json"
-                  download="varavu-selavu-backup-2026-10-23.json"
-                  className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 light:border-slate-300 bg-slate-900 light:bg-white text-slate-200 light:text-slate-700 hover:bg-slate-800 text-xs font-semibold transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Download JSON</span>
-                </a>
-              </div>
+              {/* 2. Import JSON */}
+              <button
+                type="button"
+                onClick={() => jsonFileInputRef.current?.click()}
+                className="flex items-center gap-3 p-3.5 rounded-xl border border-slate-800 light:border-slate-300 bg-slate-950/60 light:bg-slate-100 hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all text-left group cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-slate-100 light:text-slate-900 block">
+                    Import JSON
+                  </span>
+                  <span className="text-[11px] text-slate-400 block truncate">
+                    Restore from a .json backup file
+                  </span>
+                </div>
+              </button>
+
+              {/* 3. Download CSV */}
+              <button
+                type="button"
+                onClick={() => {
+                  exportTransactionsToCsv(state.transactions, state.categories, state.appName);
+                  onShowToast(`Exported ${state.transactions.length} transactions to CSV`, 'success');
+                }}
+                className="flex items-center gap-3 p-3.5 rounded-xl border border-slate-800 light:border-slate-300 bg-slate-950/60 light:bg-slate-100 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all text-left group cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-slate-100 light:text-slate-900 block">
+                    Download CSV
+                  </span>
+                  <span className="text-[11px] text-slate-400 block truncate">
+                    Export all transactions to spreadsheet (.csv)
+                  </span>
+                </div>
+              </button>
+
+              {/* 4. Upload CSV */}
+              <button
+                type="button"
+                onClick={() => csvFileInputRef.current?.click()}
+                className="flex items-center gap-3 p-3.5 rounded-xl border border-slate-800 light:border-slate-300 bg-slate-950/60 light:bg-slate-100 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all text-left group cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-slate-100 light:text-slate-900 block">
+                    Upload CSV
+                  </span>
+                  <span className="text-[11px] text-slate-400 block truncate">
+                    Import transactions from spreadsheet (.csv)
+                  </span>
+                </div>
+              </button>
+
+              {/* Hidden file inputs */}
+              <input
+                type="file"
+                ref={jsonFileInputRef}
+                accept=".json"
+                onChange={handleImportJson}
+                className="hidden"
+              />
+              <input
+                type="file"
+                ref={csvFileInputRef}
+                accept=".csv"
+                onChange={handleUploadCsv}
+                className="hidden"
+              />
             </div>
 
             <div className="pt-3 border-t border-slate-800 light:border-slate-200">

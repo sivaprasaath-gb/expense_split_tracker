@@ -104,20 +104,33 @@ export function getInitialState(): AppState {
 }
 
 export function normalizeState(raw: any): AppState {
+  const parseRawList = (list: any[]): Transaction[] => {
+    const cleanList: Transaction[] = [];
+    const seenIds = new Set<string>();
+    list.forEach((t: any, idx: number) => {
+      let txId = String(t.id || '').trim();
+      if (!txId || seenIds.has(txId)) {
+        txId = `tx-${t.date ? String(t.date).replace(/[^0-9]/g, '') : 'item'}-${Date.now()}-${idx + 1}-${Math.random().toString(36).slice(2, 6)}`;
+      }
+      seenIds.add(txId);
+      cleanList.push({
+        id: txId,
+        title: t.title || t['Title / Merchant'] || 'Untitled',
+        amount: Number(t.amount) || 0,
+        type: t.type === 'income' ? 'income' : 'expense',
+        category: t.category || 'other',
+        date: t.date || new Date().toISOString().slice(0, 10),
+        note: t.note || '',
+        paymentMethod: t.paymentMethod || 'Other',
+        createdAt: Number(t.createdAt) || (Date.now() - idx * 1000),
+      });
+    });
+    return cleanList;
+  };
+
   // If user passed a bare array of transactions directly [ { ... } ]
   if (Array.isArray(raw)) {
-    const rawTxList = raw;
-    const cleanTransactions: Transaction[] = rawTxList.map((t: any, idx: number) => ({
-      id: t.id || `tx-${t.date ? String(t.date).replace(/-/g, '') : 'item'}-${idx + 1}`,
-      title: t.title || t['Title / Merchant'] || 'Untitled',
-      amount: Number(t.amount) || 0,
-      type: t.type === 'income' ? 'income' : 'expense',
-      category: t.category || 'other',
-      date: t.date || new Date().toISOString().slice(0, 10),
-      note: t.note || '',
-      paymentMethod: t.paymentMethod || 'Other',
-      createdAt: Number(t.createdAt) || (Date.now() - idx * 1000),
-    }));
+    const cleanTransactions = parseRawList(raw);
 
     return {
       appName: 'VARAVU&SELAVU',
@@ -142,17 +155,7 @@ export function normalizeState(raw: any): AppState {
     : rawName;
 
   const rawTxList = Array.isArray(raw?.transactions) ? raw.transactions : [];
-  const cleanTransactions: Transaction[] = rawTxList.map((t: any, idx: number) => ({
-    id: t.id || `tx-${t.date ? String(t.date).replace(/-/g, '') : 'item'}-${idx + 1}`,
-    title: t.title || t['Title / Merchant'] || 'Untitled',
-    amount: Number(t.amount) || 0,
-    type: t.type === 'income' ? 'income' : 'expense',
-    category: t.category || 'other',
-    date: t.date || new Date().toISOString().slice(0, 10),
-    note: t.note || '',
-    paymentMethod: t.paymentMethod || 'Other',
-    createdAt: Number(t.createdAt) || (Date.now() - idx * 1000),
-  }));
+  const cleanTransactions = parseRawList(rawTxList);
 
   // Merge default categories with any existing or imported custom categories
   const catList: Category[] = Array.isArray(raw?.categories) && raw.categories.length > 0
@@ -304,7 +307,7 @@ export function exportTransactionsToCsv(transactions: Transaction[], categories:
 }
 
 export function parseCsvTransactions(csvText: string): Transaction[] {
-  const lines = csvText.trim().split(/\r?\n/);
+  const lines = csvText.trim().split(/\r?\n/).filter(line => line.trim().length > 0);
   if (lines.length <= 1) return [];
 
   function parseLine(text: string): string[] {
@@ -313,7 +316,7 @@ export function parseCsvTransactions(csvText: string): Transaction[] {
     let match;
     while ((match = re.exec(text)) !== null) {
       const val = match[1] !== undefined ? match[1].replace(/""/g, '"') : match[2];
-      row.push(val);
+      row.push(val ? val.trim() : '');
       if (match.index === re.lastIndex) re.lastIndex++;
     }
     return row;
@@ -332,23 +335,71 @@ export function parseCsvTransactions(csvText: string): Transaction[] {
     'Other': 'other',
   };
 
+  // Inspect headers to support dynamic column indices
+  const headerCols = parseLine(lines[0]).map(h => h.toLowerCase().trim());
+  let dateIdx = headerCols.findIndex(h => h.includes('date'));
+  let titleIdx = headerCols.findIndex(h => h.includes('title') || h.includes('merchant') || h.includes('desc') || h.includes('name'));
+  let typeIdx = headerCols.findIndex(h => h.includes('type'));
+  let catIdx = headerCols.findIndex(h => h.includes('category') || h.includes('cat'));
+  let amountIdx = headerCols.findIndex(h => h.includes('amount') || h.includes('price') || h.includes('cost') || h.includes('value'));
+  let pmIdx = headerCols.findIndex(h => h.includes('payment') || h.includes('method') || h.includes('mode'));
+  let noteIdx = headerCols.findIndex(h => h.includes('note') || h.includes('remark') || h.includes('comment'));
+
+  // Default fallback indices if header is standard Date,Title,Type,Category,Amount,Payment Method,Note
+  if (dateIdx === -1) dateIdx = 0;
+  if (titleIdx === -1) titleIdx = 1;
+  if (typeIdx === -1) typeIdx = 2;
+  if (catIdx === -1) catIdx = 3;
+  if (amountIdx === -1) amountIdx = 4;
+  if (pmIdx === -1) pmIdx = 5;
+  if (noteIdx === -1) noteIdx = 6;
+
   const transactions: Transaction[] = [];
+  const now = Date.now();
 
   for (let i = 1; i < lines.length; i++) {
     const cols = parseLine(lines[i]);
-    if (cols.length < 5) continue;
-    const [date, title, type, categoryName, amountStr, paymentMethod, note] = cols;
+    if (cols.length < 2) continue;
+
+    const rawDate = cols[dateIdx] || '';
+    const title = cols[titleIdx] || 'Untitled';
+    const rawType = (cols[typeIdx] || '').toLowerCase();
+    const categoryName = cols[catIdx] || 'other';
+    const amountStr = cols[amountIdx] || '0';
+    const paymentMethod = cols[pmIdx] || 'UPI';
+    const note = cols[noteIdx] || '';
+
+    // Standardize ISO date (YYYY-MM-DD)
+    let cleanDate = rawDate;
+    if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) {
+      cleanDate = rawDate.slice(0, 10);
+    } else if (rawDate.includes('/')) {
+      const parts = rawDate.split('/');
+      if (parts.length === 3) {
+        if (parts[2].length === 4) {
+          cleanDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+      }
+    }
+    if (!cleanDate) {
+      cleanDate = new Date().toISOString().slice(0, 10);
+    }
+
+    const cleanAmount = parseFloat(amountStr.replace(/[^0-9.-]/g, '')) || 0;
     const catId = categoryMap[categoryName] || categoryName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const dateBase = new Date(date + 'T12:00:00Z').getTime() || Date.now();
-    const createdAt = dateBase + (lines.length - i) * 60000;
+    const isIncome = rawType.includes('income') || rawType.includes('credit') || rawType.includes('varavu');
+    const dateBase = new Date(cleanDate + 'T12:00:00Z').getTime() || now;
+    const createdAt = dateBase + (lines.length - i) * 1000;
+
+    const uniqueId = `tx-${cleanDate.replace(/[^0-9]/g, '')}-${now}-${String(i).padStart(3, '0')}-${Math.random().toString(36).slice(2, 6)}`;
 
     transactions.push({
-      id: `tx-${(date || '').replace(/-/g, '')}-${String(i).padStart(3, '0')}`,
+      id: uniqueId,
       title: title || 'Untitled',
-      amount: parseFloat(amountStr) || 0,
-      type: type === 'income' ? 'income' : 'expense',
-      category: catId,
-      date: date || new Date().toISOString().slice(0, 10),
+      amount: Math.abs(cleanAmount),
+      type: isIncome ? 'income' : 'expense',
+      category: catId || 'other',
+      date: cleanDate,
       note: note || '',
       paymentMethod: (paymentMethod as any) || 'UPI',
       createdAt: createdAt,

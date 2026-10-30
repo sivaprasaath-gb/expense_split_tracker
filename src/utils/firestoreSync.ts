@@ -85,19 +85,24 @@ export function subscribeToUserData(
     collection(db, 'users', uid, 'transactions'),
     (snap) => {
       const txs: Transaction[] = [];
+      const seen = new Set<string>();
       snap.forEach((docSnap) => {
         const d = docSnap.data();
-        txs.push({
-          id: d.id || docSnap.id,
-          title: d.title || 'Untitled',
-          amount: Number(d.amount) || 0,
-          type: d.type === 'income' ? 'income' : 'expense',
-          category: d.category || 'other',
-          date: d.date || new Date().toISOString().slice(0, 10),
-          note: d.note || '',
-          paymentMethod: d.paymentMethod || 'Other',
-          createdAt: Number(d.createdAt) || Date.now(),
-        });
+        const txId = d.id && String(d.id).trim() ? String(d.id).trim() : docSnap.id;
+        if (!seen.has(txId)) {
+          seen.add(txId);
+          txs.push({
+            id: txId,
+            title: d.title || 'Untitled',
+            amount: Number(d.amount) || 0,
+            type: d.type === 'income' ? 'income' : 'expense',
+            category: d.category || 'other',
+            date: d.date || new Date().toISOString().slice(0, 10),
+            note: d.note || '',
+            paymentMethod: d.paymentMethod || 'Other',
+            createdAt: Number(d.createdAt) || Date.now(),
+          });
+        }
       });
       // Sort newest first
       txs.sort((a, b) => b.createdAt - a.createdAt);
@@ -352,7 +357,7 @@ export async function saveTransactionToFirestore(uid: string, tx: Transaction) {
       createdAt: Number(tx.createdAt) || Date.now(),
       userId: uid,
     });
-    await setDoc(doc(db, 'users', uid, 'transactions', tx.id), payload);
+    await setDoc(doc(db, 'users', uid, 'transactions', tx.id), payload, { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }

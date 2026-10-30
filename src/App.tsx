@@ -177,15 +177,18 @@ export default function App() {
       },
       onTransactions: (transactions) => {
         setState((prev) => {
-          // Prevent race condition: keep recent local transactions (created <15s ago) not yet in remote snapshot
-          const remoteMap = new Map(transactions.map((t) => [t.id, t]));
-          const now = Date.now();
-          const recentLocal = prev.transactions.filter(
-            (t) => !remoteMap.has(t.id) && now - (t.createdAt || 0) < 15000
-          );
+          // Authoritative Firestore snapshot: deduplicate by id to guarantee zero double entries
+          const seen = new Set<string>();
+          const deduped: Transaction[] = [];
+          for (const tx of transactions) {
+            if (!seen.has(tx.id)) {
+              seen.add(tx.id);
+              deduped.push(tx);
+            }
+          }
           return {
             ...prev,
-            transactions: recentLocal.length > 0 ? [...recentLocal, ...transactions] : transactions,
+            transactions: deduped,
           };
         });
       },
@@ -332,6 +335,11 @@ export default function App() {
     setIsTxModalOpen(true);
   };
 
+  const handleCloseTxModal = () => {
+    setIsTxModalOpen(false);
+    setEditingTransaction(null);
+  };
+
   const handleSaveTransaction = (
     txData: Omit<Transaction, 'id' | 'createdAt'>,
     existingId?: string
@@ -345,16 +353,29 @@ export default function App() {
         id: existingId,
         createdAt: existing?.createdAt || Date.now(),
       };
-      setState((prev) => ({
-        ...prev,
-        transactions: prev.transactions.map((t) =>
-          t.id === existingId ? updatedTx : t
-        ),
-      }));
+      setState((prev) => {
+        const idx = prev.transactions.findIndex((t) => t.id === existingId);
+        let nextTransactions: Transaction[];
+        if (idx >= 0) {
+          nextTransactions = [...prev.transactions];
+          nextTransactions[idx] = updatedTx;
+        } else {
+          nextTransactions = [updatedTx, ...prev.transactions];
+        }
+        return {
+          ...prev,
+          transactions: nextTransactions,
+        };
+      });
       if (user) {
         saveTransactionToFirestore(user.uid, updatedTx).catch((err) => {
           console.error('Failed to save updated transaction to Firestore:', err);
         });
+      }
+      // If the edited transaction has a different month, switch to that month so the user sees it
+      const txMonth = updatedTx.date.slice(0, 7);
+      if (txMonth && txMonth !== selectedMonth) {
+        setSelectedMonth(txMonth);
       }
       addToast('Transaction updated', 'success');
     } else {
@@ -381,6 +402,8 @@ export default function App() {
       }
       addToast('Transaction logged', 'success');
     }
+    // Always clear editing transaction state
+    setEditingTransaction(null);
   };
 
   const handleDeleteTransaction = (id: string) => {
@@ -756,7 +779,21 @@ export default function App() {
     if (user) {
       migrateLocalStateToFirestore(user.uid, importedState);
     }
-    setSelectedMonth(getMonthKey(new Date()));
+    // Automatically select the latest transaction month so the newly imported data is immediately visible
+    if (importedState.transactions.length > 0) {
+      const validDates = importedState.transactions
+        .map((t) => t.date)
+        .filter((d) => d && d.length >= 7)
+        .sort()
+        .reverse();
+      if (validDates.length > 0) {
+        setSelectedMonth(validDates[0].slice(0, 7));
+      } else {
+        setSelectedMonth(getMonthKey(new Date()));
+      }
+    } else {
+      setSelectedMonth(getMonthKey(new Date()));
+    }
   };
 
   const handleResetAll = () => {
@@ -1200,7 +1237,7 @@ export default function App() {
       {/* Transaction Modal (Form & Smart SMS auto-fill) */}
       <TransactionModal
         isOpen={isTxModalOpen}
-        onClose={() => setIsTxModalOpen(false)}
+        onClose={handleCloseTxModal}
         onSave={handleSaveTransaction}
         initialTransaction={editingTransaction}
         categories={state.categories}
